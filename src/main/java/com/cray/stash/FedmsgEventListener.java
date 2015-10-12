@@ -5,6 +5,7 @@ import com.atlassian.stash.commit.CommitService;
 import com.atlassian.stash.content.*;
 import com.atlassian.stash.event.RepositoryRefsChangedEvent;
 import com.atlassian.stash.event.pull.*;
+import com.atlassian.stash.notification.pull.PullRequestReviewerAddedNotification;
 import com.atlassian.stash.pull.PullRequest;
 import com.atlassian.stash.pull.PullRequestAction;
 import com.atlassian.stash.pull.PullRequestParticipant;
@@ -86,10 +87,10 @@ public class FedmsgEventListener {
      * This is a helper method for all events, it simply sends the message to Fedmsg with
      * a specified topic and prepends an topic prefix, environment, and modname.
      */
-    private void sendMessage(String topic, HashMap<String, Object> message) {
+    private void sendMessage(Message message) {
         FedmsgMessage msg = new FedmsgMessage(
-                message,
-                (topicPrefix + topic).toLowerCase(),
+                message.getMessage(),
+                (topicPrefix + message.getTopic()).toLowerCase(),
                 (new java.util.Date()).getTime() / 1000,
                 1);
         try {
@@ -104,14 +105,15 @@ public class FedmsgEventListener {
      */
     private void sendBranchChangeMessage(String state, RefChange ref, Repository repo) {
         String topic = repo.getProject().getKey() + "." + repo.getName() + ".branch." + state;
-        HashMap<String, Object> message = new HashMap<String, Object>();
-        message.put("repository", repo.getName());
-        message.put("project_key", repo.getProject().getKey());
-        message.put("branch", ref.getRefId());
-        message.put("urls", getCloneUrls(repo));
-        message.put("state", state);
+        HashMap<String, Object> content = new HashMap<String, Object>();
+        content.put("repository", repo.getName());
+        content.put("project_key", repo.getProject().getKey());
+        content.put("branch", ref.getRefId());
+        content.put("urls", getCloneUrls(repo));
+        content.put("state", state);
         repo.getProject().getKey();
-        sendMessage(topic, message);
+        Message message = new Message(content, topic);
+        sendMessage(message);
     }
 
     /*
@@ -120,24 +122,25 @@ public class FedmsgEventListener {
     private void sendTagMessage(String state, RefChange ref, Repository repo, HashSet<String> latestRefIds)
     {
         String topic = repo.getProject().getKey() + "." + repo.getName() + ".tag." + state;
-        HashMap<String, Object> message = new HashMap<String, Object>();
+        HashMap<String, Object> content = new HashMap<String, Object>();
         TimeZone tz = TimeZone.getTimeZone("UTC");
         DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm'Z'");
         df.setTimeZone(tz);
         ArrayList<Changeset> tagCommits = preProcessChangeset(repo, ref, latestRefIds);
 
-        message.put("repository", repo.getName());
-        message.put("project_key", repo.getProject().getKey());
-        message.put("tag", ref.getRefId());
-        message.put("urls", getCloneUrls(repo));
-        message.put("revision", ref.getToHash());
-        message.put("state", state);
+        content.put("repository", repo.getName());
+        content.put("project_key", repo.getProject().getKey());
+        content.put("tag", ref.getRefId());
+        content.put("urls", getCloneUrls(repo));
+        content.put("revision", ref.getToHash());
+        content.put("state", state);
         if(tagCommits.size() > 0) {
-            message.put("author", tagCommits.get(0).getAuthor());
-            message.put("tag message", tagCommits.get(0).getMessage());
-            message.put("when_timestamp", df.format(tagCommits.get(0).getAuthorTimestamp()));
+            content.put("author", tagCommits.get(0).getAuthor());
+            content.put("tag message", tagCommits.get(0).getMessage());
+            content.put("when_timestamp", df.format(tagCommits.get(0).getAuthorTimestamp()));
         }
-        sendMessage(topic, message);
+        Message message = new Message(content, topic);
+        sendMessage(message);
     }
 
     /*
@@ -165,7 +168,7 @@ public class FedmsgEventListener {
         Page<Changeset> commits = getChangeset(repo, ref);
         // Process commits newest to oldest
         for (Changeset commit : commits.getValues()) {
-             if (latestRefIds.contains(commit.getId())) {
+            if (latestRefIds.contains(commit.getId())) {
                 break;
             } else {
                 newCommits.add(commit);
@@ -177,22 +180,19 @@ public class FedmsgEventListener {
     /*
      * Returns a set of the various links (http, ssh) that a particular scm (git, svn) can clone from.
      */
-    private HashMap<String, String> getCloneUrls(Repository repo)
-    {
+    private HashMap<String, String> getCloneUrls(Repository repo) {
         final RepositoryCloneLinksRequest linksRequest = new RepositoryCloneLinksRequest.Builder()
                 .repository(repo)
                 .build();
         Set<NamedLink> setLinks = repoService.getCloneLinks(linksRequest);
         HashMap<String, String> links = new HashMap<String, String>(2);
-        for(NamedLink link: setLinks)
-        {
+        for(NamedLink link: setLinks) {
             if(link.getHref().contains("http://")) {
                 links.put(link.getName() + "_url", "http://" + link.getHref().substring(link.getHref().indexOf("@") + 1));
             }
             else {
                 links.put(link.getName() + "_url", link.getHref());
             }
-
         }
         return links;
     }
@@ -207,29 +207,29 @@ public class FedmsgEventListener {
         DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm'Z'");
         df.setTimeZone(tz);
 
-        HashMap<String, Object> message = new HashMap<String, Object>();
+        HashMap<String, Object> content = new HashMap<String, Object>();
         HashMap<String, String> author = new HashMap<String, String>(2);
         author.put("name", commit.getAuthor().getName());
         author.put("emailAddress", commit.getAuthor().getEmailAddress());
-        message.put("author", author);
-        message.put("comments", commit.getMessage());
-        message.put("project_key", commit.getRepository().getProject().getKey());
-        message.put("urls", getCloneUrls(commit.getRepository()));
-        message.put("repository", commit.getRepository().getName());
-        message.put("project", commit.getRepository().getProject().getName());
-        message.put("revision", commit.getId());
-        message.put("when_timestamp", df.format(commit.getAuthorTimestamp()));
-        message.put("branch", branch);
-        message.put("files", files);
+        content.put("author", author);
+        content.put("comments", commit.getMessage());
+        content.put("project_key", commit.getRepository().getProject().getKey());
+        content.put("urls", getCloneUrls(commit.getRepository()));
+        content.put("repository", commit.getRepository().getName());
+        content.put("project", commit.getRepository().getProject().getName());
+        content.put("revision", commit.getId());
+        content.put("when_timestamp", df.format(commit.getAuthorTimestamp()));
+        content.put("branch", branch);
+        content.put("files", files);
 
-        return message;
+        return content;
     }
 
     /*
      * This method takes an ArrayList of commits (in between two ref Changes) and constructs a list of
      * message to send. All commits in the ArrayList should be new commits.
      */
-    private void processChanges(ArrayList<Changeset> commits, RefChange ref)
+    private ArrayList<Message> processChanges(ArrayList<Changeset> commits, RefChange ref)
     {
         //list of messages to send across the fedmsg bus
         ArrayList<HashMap<String, Object>> toSend = new ArrayList<HashMap<String, Object>>();
@@ -256,12 +256,17 @@ public class FedmsgEventListener {
         }
 
         ListIterator<HashMap<String, Object>> li = toSend.listIterator(toSend.size());
+        ArrayList<Message> messageList = new ArrayList<Message>(toSend.size());
         while(li.hasPrevious())
         {
             HashMap<String, Object> sending = li.previous();
             String topic = sending.get("project_key").toString() + "." + sending.get("repository").toString() + ".commit";
-            sendMessage(topic, sending);
+            Message message = new Message(sending, topic);
+            sendMessage(message);
+            messageList.add(message);
         }
+
+        return messageList;
     }
 
     /*
@@ -294,7 +299,7 @@ public class FedmsgEventListener {
                 else if(refChange.getRefId().contains("refs/tags")){
                     // Tag creation
                     if(isCreated(refChange)) {
-                    sendTagMessage("created", refChange, repository, latestRefIds);
+                        sendTagMessage("created", refChange, repository, latestRefIds);
                     }
                     // Tag deletion
                     else if(isDeleted(refChange)) {
@@ -313,10 +318,9 @@ public class FedmsgEventListener {
      * This method extracts all the relevant information from a pull request event and packages it into
      * a HashMap for usage with the Fedmsg commands. It is similar to the refChangeExtracter.
      */
-    private HashMap<String, Object> prExtracter (PullRequestEvent event)
+    public HashMap<String, Object> prExtracter (PullRequestEvent event)
     {
         PullRequest pr = event.getPullRequest();
-
         // Time format bits.
         TimeZone tz = TimeZone.getTimeZone("UTC");
         DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm'Z'");
@@ -324,6 +328,8 @@ public class FedmsgEventListener {
 
         // Extract information from the PR event
         HashMap<String, String> author = new HashMap<String, String>(2);
+        HashMap<String, Object> message = new HashMap<String, Object>();
+
         author.put("name", pr.getAuthor().getUser().getDisplayName());
         author.put("emailAddress", pr.getAuthor().getUser().getEmailAddress());
 
@@ -356,7 +362,6 @@ public class FedmsgEventListener {
         destination.put("project_key", destProjectKey);
 
         // Construct the body of the fedmsg message
-        HashMap<String, Object> message = new HashMap<String, Object>();
         message.put("author", author);
         message.put("when_timestamp", df.format(date));
         message.put("source", source);
@@ -370,12 +375,84 @@ public class FedmsgEventListener {
              * via Fedmsg, the contents of the message must be able to be encoded by JSON)
              * so we need to create a new list of just strings for each reviewer.
              */
-            for (PullRequestParticipant person : reviewers)
-            {
+            for (PullRequestParticipant person : reviewers) {
                 reviewerList.add(person.getUser().getDisplayName());
             }
+            message.put("reviewers", reviewerList);
+
         }
-        message.put("reviewers", reviewerList);
+
+        return message;
+    }
+
+    /*
+     * This method is for constructing the basic pull request event message. It extracts all of the
+     * necessary information from the event, and creates a Message object to then send via fedmsg.
+     */
+    public Message getMessage(PullRequestEvent event, String type)
+    {
+        HashMap<String, Object> content = prExtracter(event);
+        String originProjectKey = ((HashMap<String, Object>)content.get("source")).get("project_key").toString();
+        String originRepo = ((HashMap<String, Object>)content.get("source")).get("repository").toString();
+        String topic = originProjectKey + "." + originRepo + type;
+        Message message = new Message(content, topic);
+        return message;
+    }
+
+    /*
+     * This getMessage method handles when the approval status changes. Depending on the event
+     * the topic needs to change and also the content of the message.
+     */
+    public Message getMessage(PullRequestApprovalEvent event)
+    {
+        PullRequestAction action = event.getAction();
+
+        HashMap<String, Object> content = prExtracter(event);
+        String originProjectKey = ((HashMap<String, Object>)content.get("source")).get("project_key").toString();
+        String originRepo = ((HashMap<String, Object>)content.get("source")).get("repository").toString();
+        String topic = "";
+        if(action == PullRequestAction.APPROVED){
+            topic = originProjectKey + "." + originRepo + ".pullrequest.approved";
+            content.put("approver", event.getParticipant().getUser().getDisplayName());
+        }
+        else if(action == PullRequestAction.UNAPPROVED) {
+            topic = originProjectKey + "." + originRepo + ".pullrequest.unapproved";
+            content.put("disprover", event.getParticipant().getUser().getDisplayName());
+        }
+        Message message = new Message(content, topic);
+        return message;
+    }
+
+    /*
+     * This getMessage method handles specific reviewersmodified event. It needs to
+     * extract a list of reviewers added and removed and append that to the message.
+     */
+    public Message getMessage(PullRequestRolesUpdatedEvent event, String type)
+    {
+        Set<StashUser> added = event.getAddedReviewers();
+        Set<StashUser> removed = event.getRemovedReviewers();
+
+        HashMap<String, Object> content = prExtracter(event);
+        String originProjectKey = ((HashMap<String, Object>)content.get("source")).get("project_key").toString();
+        String originRepo = ((HashMap<String, Object>)content.get("source")).get("repository").toString();
+
+        if(!added.isEmpty()) {
+            ArrayList<String> addedList = new ArrayList<String>(added.size());
+            for(StashUser user: added) {
+                addedList.add(user.getDisplayName());
+            }
+            content.put("reviewers_added", addedList);
+        }
+        if(!removed.isEmpty()) {
+            ArrayList<String> removedList = new ArrayList<String>(removed.size());
+            for(StashUser user: removed) {
+                removedList.add(user.getDisplayName());
+            }
+            content.put("reviewers_removed", removedList);
+        }
+
+        String topic = originProjectKey + "." + originRepo + type;
+        Message message = new Message(content, topic);
         return message;
     }
 
@@ -389,13 +466,9 @@ public class FedmsgEventListener {
      * message to the relevant topic about this event.
      */
     @EventListener
-    public void merged(PullRequestMergedEvent event)
-    {
-        HashMap<String, Object> message = prExtracter(event);
-        String originProjectKey = ((HashMap<String, Object>)message.get("source")).get("project_key").toString();
-        String originRepo = ((HashMap<String, Object>)message.get("source")).get("repository").toString();
-        String topic = originProjectKey + "." + originRepo + ".pullrequest.merged";
-        sendMessage(topic, message);
+    public void merged(PullRequestMergedEvent event) {
+        Message message = getMessage(event,  ".pullrequest.merged");
+        sendMessage(message);
     }
 
     /*
@@ -403,13 +476,9 @@ public class FedmsgEventListener {
      * about the event.
      */
     @EventListener
-    public void opened(PullRequestOpenedEvent event)
-    {
-        HashMap<String, Object> message = prExtracter(event);
-        String originProjectKey = ((HashMap<String, Object>)message.get("source")).get("project_key").toString();
-        String originRepo = ((HashMap<String, Object>)message.get("source")).get("repository").toString();
-        String topic = originProjectKey + "." + originRepo + ".pullrequest.opened";
-        sendMessage(topic, message);
+    public void opened(PullRequestOpenedEvent event) {
+        Message message = getMessage(event,  ".pullrequest.opened");
+        sendMessage(message);
     }
 
     /*
@@ -418,13 +487,9 @@ public class FedmsgEventListener {
      * message.
      */
     @EventListener
-    public void declined(PullRequestDeclinedEvent event)
-    {
-        HashMap<String, Object> message = prExtracter(event);
-        String originProjectKey = ((HashMap<String, Object>)message.get("source")).get("project_key").toString();
-        String originRepo = ((HashMap<String, Object>)message.get("source")).get("repository").toString();
-        String topic = originProjectKey + "." + originRepo + ".pullrequest.declined";
-        sendMessage(topic, message);
+    public void declined(PullRequestDeclinedEvent event) {
+        Message message = getMessage(event,  ".pullrequest.declined");
+        sendMessage(message);
     }
 
     /*
@@ -432,57 +497,18 @@ public class FedmsgEventListener {
      * the relevant topic and adds in who is responsible for the change in status.
      */
     @EventListener
-    public void approvalStatusChange(PullRequestApprovalEvent event)
-    {
-        // Find out what sort of event this pull request is
-        PullRequestAction action = event.getAction();
-
-        HashMap<String, Object> message = prExtracter(event);
-        String originProjectKey = ((HashMap<String, Object>)message.get("source")).get("project_key").toString();
-        String originRepo = ((HashMap<String, Object>)message.get("source")).get("repository").toString();
-
-        if(action == PullRequestAction.APPROVED){
-            String topic = originProjectKey + "." + originRepo + ".pullrequest.approved";
-            message.put("approver", event.getParticipant().getUser().getDisplayName());
-            sendMessage(topic, message);
-        }
-        else if(action == PullRequestAction.UNAPPROVED) {
-            String topic = originProjectKey + "." + originRepo + ".pullrequest.unapproved";
-            message.put("disprover", event.getParticipant().getUser().getDisplayName());
-            sendMessage(topic, message);
-        }
+    public void approvalStatusChange(PullRequestApprovalEvent event) {
+        Message message = getMessage(event);
+        sendMessage(message);
     }
 
     /*
-     * This event fires when reviewers for a pull request are modified and sends a Fedmsg message to the relevant
-     * topic with a list of the newly added or recently deleted reviewer(s).
+     * This event fires when reviewers for a pull request are modified and sends a Fedmsg message to
+     * the relevant topic with a list of the newly added or recently deleted reviewer(s).
      */
     @EventListener
-    public void reviewersModified(PullRequestRolesUpdatedEvent event)
-    {
-        Set<StashUser> added = event.getAddedReviewers();
-        Set<StashUser> removed = event.getRemovedReviewers();
-
-        HashMap<String, Object> message = prExtracter(event);
-        String originProjectKey = ((HashMap<String, Object>)message.get("source")).get("project_key").toString();
-        String originRepo = ((HashMap<String, Object>)message.get("source")).get("repository").toString();
-
-        if(!added.isEmpty()) {
-            ArrayList<String> addedList = new ArrayList<String>(added.size());
-            for(StashUser user: added) {
-                addedList.add(user.getDisplayName());
-            }
-            message.put("reviewers_added", addedList);
-        }
-        if(!removed.isEmpty()) {
-            ArrayList<String> removedList = new ArrayList<String>(removed.size());
-            for(StashUser user: removed) {
-                removedList.add(user.getDisplayName());
-            }
-            message.put("reviewers_removed", removedList);
-        }
-
-        String topic = originProjectKey + "." + originRepo + ".pullrequest.reviewersmodified";
-        sendMessage(topic, message);
+    public void reviewersModified(PullRequestRolesUpdatedEvent event) {
+        Message message = getMessage(event,  ".pullrequest.reviewersmodified");
+        sendMessage(message);
     }
 }
