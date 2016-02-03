@@ -44,6 +44,7 @@ public class FedmsgEventListener {
     private RefService repoData;
     private RepositoryService repoService;
     private String topicPrefix;
+    private int pageLimit;
     //private static final Logger log = LoggerFactory.getLogger(FedmsgEventListener.class);
 
     public FedmsgEventListener(CommitService commitService, RefService repoData, RepositoryService repoService, ApplicationPropertiesService appService) {
@@ -58,7 +59,7 @@ public class FedmsgEventListener {
             // The connection to that endpoint
             topicPrefix = appService.getPluginProperty("plugin.fedmsg.events.topic.prefix");
             //log.info("Topic prefix: " + topicPrefix);
-
+            pageLimit = Integer.parseInt(appService.getPluginProperty("plugin.fedmsg.pageLimit"));
         } catch (Exception e) {
             sendMail("Failed to retrieve properties " + e.getMessage());
         }
@@ -217,7 +218,7 @@ public class FedmsgEventListener {
         CommitsBetweenRequest.Builder commitsRequest = new CommitsBetweenRequest.Builder(repository);
         commitsRequest.exclude(refChange.getFromHash());
         commitsRequest.include(refChange.getToHash());
-        return commitService.getCommitsBetween(commitsRequest.build(), PageUtils.newRequest(0, 9999));
+        return commitService.getCommitsBetween(commitsRequest.build(), PageUtils.newRequest(0, pageLimit));
     }
 
     /*
@@ -326,7 +327,7 @@ public class FedmsgEventListener {
                 // This is the request to grab the change data, which is where we find the file path info
                 final ChangesetsRequest.Builder changesRequestBuilder = new ChangesetsRequest.Builder(commits.get(i).getRepository());
                 ChangesetsRequest changesRequest = changesRequestBuilder.commitIds(commits.get(i).getId()).build();
-                final Page<Changeset> page = commitService.getChangesets(changesRequest, PageUtils.newRequest(0, 9999));
+                final Page<Changeset> page = commitService.getChangesets(changesRequest, PageUtils.newRequest(0, pageLimit));
 
                 ArrayList<String> filesChanged = new ArrayList<String>();
                 for (Changeset change : page.getValues()) {
