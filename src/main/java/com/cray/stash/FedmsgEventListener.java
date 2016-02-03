@@ -1,11 +1,13 @@
 package com.cray.stash;
 
 import com.atlassian.event.api.EventListener;
+import com.atlassian.stash.commit.Changeset;
 import com.atlassian.stash.commit.CommitService;
 import com.atlassian.stash.content.*;
+import com.atlassian.stash.commit.*;
 import com.atlassian.stash.event.RepositoryRefsChangedEvent;
 import com.atlassian.stash.event.pull.*;
-import com.atlassian.stash.notification.pull.PullRequestReviewerAddedNotification;
+import com.atlassian.stash.exception.AuthorisationException;
 import com.atlassian.stash.pull.PullRequest;
 import com.atlassian.stash.pull.PullRequestAction;
 import com.atlassian.stash.pull.PullRequestParticipant;
@@ -16,6 +18,7 @@ import com.atlassian.stash.util.Page;
 import com.atlassian.stash.util.PageUtils;
 import com.atlassian.stash.server.ApplicationPropertiesService;
 
+// Sending fedmsg messages
 import org.fedoraproject.fedmsg.FedmsgConnection;
 import org.fedoraproject.fedmsg.FedmsgMessage;
 
@@ -24,43 +27,58 @@ import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.*;
 
+//import org.slf4j.Logger;
+//import org.slf4j.LoggerFactory;
+
+// Sending Emails regarding exceptions
+import javax.mail.MessagingException;
+import javax.mail.Session;
+import javax.mail.Transport;
+import javax.mail.internet.InternetAddress;
+import javax.mail.internet.MimeMessage;
+
 public class FedmsgEventListener {
     private CommitService commitService;
     private String endpoint;
     private FedmsgConnection connect;
-    private RepositoryMetadataService repoData;
+    private RefService repoData;
     private RepositoryService repoService;
     private String topicPrefix;
-    private ApplicationPropertiesService appService;
+    //private static final Logger log = LoggerFactory.getLogger(FedmsgEventListener.class);
 
-    public FedmsgEventListener(CommitService commitService, RepositoryMetadataService repoData, RepositoryService repoService, ApplicationPropertiesService appService) {
+    public FedmsgEventListener(CommitService commitService, RefService repoData, RepositoryService repoService, ApplicationPropertiesService appService) {
+        //log.info("Initializing FedmsgEventListerner plugin...");
         this.commitService = commitService;
         this.repoData = repoData;
         this.repoService = repoService;
-        this.appService = appService;
         //This is the address of the relay_inbound
-        this.endpoint = appService.getPluginProperty("plugin.fedmsg.events.relay.endpoint");
-        // The connection to that endpoint
-        topicPrefix = appService.getPluginProperty("plugin.fedmsg.events.topic.prefix");
-        this.connect = new FedmsgConnection(endpoint, 2000).connect();
+        try {
+            endpoint = appService.getPluginProperty("plugin.fedmsg.events.relay.endpoint");
+            //log.info("Relay endpoint: " + endpoint);
+            // The connection to that endpoint
+            topicPrefix = appService.getPluginProperty("plugin.fedmsg.events.topic.prefix");
+            //log.info("Topic prefix: " + topicPrefix);
+
+        } catch (Exception e) {
+            sendMail("Failed to retrieve properties " + e.getMessage());
+        }
+
+        try {
+            this.connect = new FedmsgConnection(endpoint, 2000).connect();
+            //log.info("FedmsgEventListener plugin initialized successfully!");
+        } catch (Exception e) {
+            sendMail("Failed to connect to fedmsg relay" + e.getMessage());
+        }
     }
 
     /*
      * These are helper methods to determine if a branch is newly created or deleted.
      */
     private boolean isCreated(RefChange ref) {
-        if (ref.getFromHash().contains("0000000000000000000000000000000000000000")) {
-            return true;
-        } else {
-            return false;
-        }
+        return ref.getFromHash().contains("0000000000000000000000000000000000000000");
     }
     private boolean isDeleted(RefChange ref) {
-        if (ref.getToHash().contains("0000000000000000000000000000000000000000")) {
-            return true;
-        } else {
-            return false;
-        }
+        return ref.getToHash().contains("0000000000000000000000000000000000000000");
     }
 
     /*
@@ -69,17 +87,19 @@ public class FedmsgEventListener {
      * commits on it and we don't want to miss those.
      */
     private HashSet<String> getLatestRefs(Repository repo, RefChange ref) {
-        final RepositoryBranchesRequest branchesRequest = new RepositoryBranchesRequest.Builder()
-                .repository(repo)
-                .build();
-
+        final RepositoryBranchesRequest branchesRequest = new RepositoryBranchesRequest.Builder(repo).build();
         Page<Branch> branches = repoData.getBranches(branchesRequest, PageUtils.newRequest(0, 100));
         HashSet<String> refIds = new HashSet<String>(branches.getSize());
-        for (Branch branch : branches.getValues()) {
-            if(!branch.getId().contentEquals(ref.getRefId())) {
-                refIds.add(branch.getLatestChangeset());
+        try {
+            for (Branch branch : branches.getValues()) {
+                if (!branch.getId().contentEquals(ref.getRefId())) {
+                    refIds.add(branch.getLatestCommit());
+                }
             }
+        } catch(Exception e) {
+            sendMail("An error occurred while finding all the latest refIds for each branch in a repo " + e.getMessage());
         }
+        //log.info("Found the latest refs: " + refIds);
         return refIds;
     }
 
@@ -88,6 +108,7 @@ public class FedmsgEventListener {
      * a specified topic and prepends an topic prefix, environment, and modname.
      */
     private void sendMessage(Message message) {
+        //log.info("Sending fedmsg message...");
         FedmsgMessage msg = new FedmsgMessage(
                 message.getMessage(),
                 (topicPrefix + message.getTopic()).toLowerCase(),
@@ -96,7 +117,43 @@ public class FedmsgEventListener {
         try {
             connect.send(msg);
         } catch (IOException e) {
-            System.out.println(e.getMessage());
+            sendMail("Encountered IOException when sending a fedmsg msg" + e);
+        } catch (Exception e) {
+            sendMail("Encountered an error when sending a fedmsg msg" + e);
+        }
+    }
+    /*
+     *  This method is used to send email to ci-info in the event that an exception was
+     *  encountered somewhere in the plugin.
+     */
+    public void sendMail(String email) {
+        String to = "ci-info@cray.com";
+        String from = "build@cray.com";
+        String host = "relaya.us.cray.com";
+        Properties properties = System.getProperties();
+        properties.setProperty("mail.smtp.host", host);
+        Session session = Session.getDefaultInstance(properties);
+        try {
+            // Create a default MimeMessage object.
+            MimeMessage message = new MimeMessage(session);
+
+            // Set From: header field of the header.
+            message.setFrom(new InternetAddress(from));
+
+            // Set To: header field of the header.
+            message.addRecipient(javax.mail.Message.RecipientType.TO, new InternetAddress(to));
+
+            // Set Subject: header field
+            message.setSubject("The Stash Plugin Has encountered an error.");
+
+            // Now set the actual message
+            message.setText(email);
+
+            // Send message
+            Transport.send(message);
+            System.out.println("Sent message successfully....");
+        } catch (MessagingException mex) {
+            mex.printStackTrace();
         }
     }
 
@@ -106,12 +163,18 @@ public class FedmsgEventListener {
     private void sendBranchChangeMessage(String state, RefChange ref, Repository repo) {
         String topic = repo.getProject().getKey() + "." + repo.getName() + ".branch." + state;
         HashMap<String, Object> content = new HashMap<String, Object>();
-        content.put("repository", repo.getName());
-        content.put("project_key", repo.getProject().getKey());
-        content.put("branch", ref.getRefId());
-        content.put("urls", getCloneUrls(repo));
-        content.put("state", state);
-        repo.getProject().getKey();
+        try {
+            content.put("repository", repo.getName());
+            content.put("project_key", repo.getProject().getKey());
+            content.put("branch", ref.getRefId());
+            content.put("urls", getCloneUrls(repo));
+            content.put("state", state);
+            repo.getProject().getKey();
+
+        } catch (Exception e)
+        {
+            sendMail("Error while scraping for branch change information " + e.getMessage());
+        }
         Message message = new Message(content, topic);
         sendMessage(message);
     }
@@ -124,20 +187,24 @@ public class FedmsgEventListener {
         String topic = repo.getProject().getKey() + "." + repo.getName() + ".tag." + state;
         HashMap<String, Object> content = new HashMap<String, Object>();
         TimeZone tz = TimeZone.getTimeZone("UTC");
-        DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm'Z'");
+        DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
         df.setTimeZone(tz);
-        ArrayList<Changeset> tagCommits = preProcessChangeset(repo, ref, latestRefIds);
+        ArrayList<Commit> tagCommits = preProcessChangeset(repo, ref, latestRefIds);
 
-        content.put("repository", repo.getName());
-        content.put("project_key", repo.getProject().getKey());
-        content.put("tag", ref.getRefId());
-        content.put("urls", getCloneUrls(repo));
-        content.put("revision", ref.getToHash());
-        content.put("state", state);
-        if(tagCommits.size() > 0) {
-            content.put("author", tagCommits.get(0).getAuthor());
-            content.put("tag message", tagCommits.get(0).getMessage());
-            content.put("when_timestamp", df.format(tagCommits.get(0).getAuthorTimestamp()));
+        try {
+            content.put("repository", repo.getName());
+            content.put("project_key", repo.getProject().getKey());
+            content.put("tag", ref.getRefId());
+            content.put("urls", getCloneUrls(repo));
+            content.put("revision", ref.getToHash());
+            content.put("state", state);
+            if(tagCommits.size() > 0) {
+                content.put("author", tagCommits.get(0).getAuthor());
+                content.put("tag message", tagCommits.get(0).getMessage());
+                content.put("when_timestamp", df.format(tagCommits.get(0).getAuthorTimestamp()));
+            }
+        } catch(Exception e) {
+            sendMail("Error while scraping for tag change information " + e.getMessage());
         }
         Message message = new Message(content, topic);
         sendMessage(message);
@@ -146,12 +213,11 @@ public class FedmsgEventListener {
     /*
      * This method gets commit(s) in between two refs.
      */
-    private Page<Changeset> getChangeset(Repository repository, RefChange refChange) {
-        final ChangesetsBetweenRequest changesetRequest = new ChangesetsBetweenRequest.Builder(repository)
-                .exclude(refChange.getFromHash())
-                .include(refChange.getToHash())
-                .build();
-        return commitService.getChangesetsBetween(changesetRequest, PageUtils.newRequest(0, 9999));
+    private Page<Commit> getChangeset(Repository repository, RefChange refChange) {
+        CommitsBetweenRequest.Builder commitsRequest = new CommitsBetweenRequest.Builder(repository);
+        commitsRequest.exclude(refChange.getFromHash());
+        commitsRequest.include(refChange.getToHash());
+        return commitService.getCommitsBetween(commitsRequest.build(), PageUtils.newRequest(0, 9999));
     }
 
     /*
@@ -160,20 +226,26 @@ public class FedmsgEventListener {
      * exists for when someone creates a branch with new commits on it and pushes that new branch
      * upstream.
      */
-    private ArrayList<Changeset> preProcessChangeset(Repository repo, RefChange ref, HashSet<String> latestRefIds) {
+    private ArrayList<Commit> preProcessChangeset(Repository repo, RefChange ref, HashSet<String> latestRefIds) {
+        //log.info("Finding latest commits on given ref.");
         // List of messages to send across the fedmsg bus that have not already been processed
-        ArrayList<Changeset> newCommits = new ArrayList<Changeset>();
+        ArrayList<Commit> newCommits = new ArrayList<Commit>();
 
         // Page of all commits, likely containing ones we've already processed
-        Page<Changeset> commits = getChangeset(repo, ref);
+        Page<Commit> commits = getChangeset(repo, ref);
         // Process commits newest to oldest
-        for (Changeset commit : commits.getValues()) {
-            if (latestRefIds.contains(commit.getId())) {
-                break;
-            } else {
-                newCommits.add(commit);
+        try {
+            for (Commit commit : commits.getValues()) {
+                if (latestRefIds.contains(commit.getId())) {
+                    break;
+                } else {
+                    newCommits.add(commit);
+                }
             }
+        } catch(Exception e) {
+            sendMail("Error while finding new commits from a refChange " + e.getMessage());
         }
+        //log.info("Found the latest commits: " + newCommits);
         return newCommits;
     }
 
@@ -184,15 +256,25 @@ public class FedmsgEventListener {
         final RepositoryCloneLinksRequest linksRequest = new RepositoryCloneLinksRequest.Builder()
                 .repository(repo)
                 .build();
-        Set<NamedLink> setLinks = repoService.getCloneLinks(linksRequest);
         HashMap<String, String> links = new HashMap<String, String>(2);
-        for(NamedLink link: setLinks) {
-            if(link.getHref().contains("http://")) {
-                links.put(link.getName() + "_url", "http://" + link.getHref().substring(link.getHref().indexOf("@") + 1));
+        try {
+            Set<NamedLink> setLinks = repoService.getCloneLinks(linksRequest);
+            for(NamedLink link: setLinks) {
+                if(link.getHref().contains("https://")) {
+                    links.put(link.getName() + "_url", "https://" + link.getHref().substring(link.getHref().indexOf("@") + 1));
+                }
+                else if (link.getHref().contains("http://"))
+                {
+                    links.put(link.getName() + "_url", "http://" + link.getHref().substring(link.getHref().indexOf("@") + 1));
+                }
+                else {
+                    links.put(link.getName() + "_url", link.getHref());
+                }
             }
-            else {
-                links.put(link.getName() + "_url", link.getHref());
-            }
+        } catch(AuthorisationException e) {
+            sendMail("An authorisation error occurred " + e.getMessage());
+        } catch(Exception e){
+            sendMail("An error occurred while getting  clone urls " + e.getMessage());
         }
         return links;
     }
@@ -201,27 +283,30 @@ public class FedmsgEventListener {
      * This method takes an individual commit object, and extracts the information from it that we want to send to
      * Fedmsg. This method is for use with the pushEvent method, so strictly refChanges.
      */
-    private HashMap<String, Object> refChangeExtracter(Changeset commit, ArrayList<String> files, String branch)
+    private HashMap<String, Object> refChangeExtracter(Commit commit, ArrayList<String> files, String branch)
     {
         TimeZone tz = TimeZone.getTimeZone("UTC");
-        DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm'Z'");
+        DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
         df.setTimeZone(tz);
 
         HashMap<String, Object> content = new HashMap<String, Object>();
         HashMap<String, String> author = new HashMap<String, String>(2);
-        author.put("name", commit.getAuthor().getName());
-        author.put("emailAddress", commit.getAuthor().getEmailAddress());
-        content.put("author", author);
-        content.put("comments", commit.getMessage());
-        content.put("project_key", commit.getRepository().getProject().getKey());
-        content.put("urls", getCloneUrls(commit.getRepository()));
-        content.put("repository", commit.getRepository().getName());
-        content.put("project", commit.getRepository().getProject().getName());
-        content.put("revision", commit.getId());
-        content.put("when_timestamp", df.format(commit.getAuthorTimestamp()));
-        content.put("branch", branch);
-        content.put("files", files);
-
+        try {
+            author.put("name", commit.getAuthor().getName());
+            author.put("emailAddress", commit.getAuthor().getEmailAddress());
+            content.put("author", author);
+            content.put("comments", commit.getMessage());
+            content.put("project_key", commit.getRepository().getProject().getKey());
+            content.put("urls", getCloneUrls(commit.getRepository()));
+            content.put("repository", commit.getRepository().getName());
+            content.put("project", commit.getRepository().getProject().getName());
+            content.put("revision", commit.getId());
+            content.put("when_timestamp", df.format(commit.getAuthorTimestamp()));
+            content.put("branch", branch);
+            content.put("files", files);
+        } catch (Exception e) {
+            sendMail("An error occured while extracing information from a refchange " + e.getMessage());
+        }
         return content;
     }
 
@@ -229,43 +314,48 @@ public class FedmsgEventListener {
      * This method takes an ArrayList of commits (in between two ref Changes) and constructs a list of
      * message to send. All commits in the ArrayList should be new commits.
      */
-    private ArrayList<Message> processChanges(ArrayList<Changeset> commits, RefChange ref)
+    private ArrayList<Message> processChanges(ArrayList<Commit> commits, RefChange ref)
     {
+        //log.info("Collecting relevant information for  given refChange event");
         //list of messages to send across the fedmsg bus
         ArrayList<HashMap<String, Object>> toSend = new ArrayList<HashMap<String, Object>>();
 
-        // Parsing backwards through the new commits
-        for (int i = 0; i < commits.size(); i++) {
-            // This is the request to grab the change data, which is where we find the file path info
-            final DetailedChangesetsRequest changesRequest = new DetailedChangesetsRequest.Builder(commits.get(i).getRepository())
-                    .changesetId(commits.get(i).getId())
-                    .maxChangesPerCommit(9999)
-                    .build();
+        try {
+            // Parsing backwards through the new commits
+            for (int i = 0; i < commits.size(); i++) {
+                // This is the request to grab the change data, which is where we find the file path info
+                final ChangesetsRequest.Builder changesRequestBuilder = new ChangesetsRequest.Builder(commits.get(i).getRepository());
+                ChangesetsRequest changesRequest = changesRequestBuilder.commitIds(commits.get(i).getId()).build();
+                final Page<Changeset> page = commitService.getChangesets(changesRequest, PageUtils.newRequest(0, 9999));
 
-            final Page<DetailedChangeset> page = commitService.getDetailedChangesets(changesRequest, PageUtils.newRequest(0, 9999));
-
-            ArrayList<String> filesChanged = new ArrayList<String>();
-            for (DetailedChangeset change : page.getValues())
-            {
-                for (Change files : change.getChanges().getValues())
-                {
-                    filesChanged.add(files.getPath().toString());
+                ArrayList<String> filesChanged = new ArrayList<String>();
+                for (Changeset change : page.getValues()) {
+                    for (Change files : change.getChanges().getValues()) {
+                        filesChanged.add(files.getPath().toString());
+                    }
                 }
+                toSend.add(refChangeExtracter(commits.get(i), filesChanged, ref.getRefId().substring(11)));
             }
-            toSend.add(refChangeExtracter(commits.get(i), filesChanged, ref.getRefId().substring(11)));
+
+        } catch (NullPointerException e){
+            sendMail("A NullPointerException occurred while processing changes " + e.getMessage());
+        } catch(Exception e){
+            sendMail("An error occurred while parsing new commits " + e.getMessage());
         }
 
         ListIterator<HashMap<String, Object>> li = toSend.listIterator(toSend.size());
         ArrayList<Message> messageList = new ArrayList<Message>(toSend.size());
-        while(li.hasPrevious())
-        {
-            HashMap<String, Object> sending = li.previous();
-            String topic = sending.get("project_key").toString() + "." + sending.get("repository").toString() + ".commit";
-            Message message = new Message(sending, topic);
-            sendMessage(message);
-            messageList.add(message);
+        try {
+            while (li.hasPrevious()) {
+                HashMap<String, Object> sending = li.previous();
+                String topic = sending.get("project_key").toString() + "." + sending.get("repository").toString() + ".commit";
+                Message message = new Message(sending, topic);
+                sendMessage(message);
+                messageList.add(message);
+            }
+        } catch(Exception e){
+            sendMail("An error occurred while sending all the new commits to fedmsg " + e.getMessage());
         }
-
         return messageList;
     }
 
@@ -275,42 +365,51 @@ public class FedmsgEventListener {
      */
     @EventListener
     public void refChangeListener(RepositoryRefsChangedEvent event) {
-        Collection<RefChange> refChanges = event.getRefChanges();
-        Repository repository = event.getRepository();
+        //log.info("RefChange event occurred.");
+        try {
+            Collection<RefChange> refChanges = event.getRefChanges();
+            Repository repository = event.getRepository();
 
-        for (RefChange refChange : refChanges) {
-            HashSet<String> latestRefIds = getLatestRefs(repository, refChange);
+            for (RefChange refChange : refChanges) {
+                HashSet<String> latestRefIds = getLatestRefs(repository, refChange);
 
-            // Are we dealing with a new tag/branch or just normal commits?
-            if(isCreated(refChange) || isDeleted(refChange)) {
-                // Are we dealing with a tag/branch refChange?
-                if(!refChange.getRefId().contains("refs/tags")) {
-                    // Branch creation
-                    if (isCreated(refChange)) {
-                        sendBranchChangeMessage("created", refChange, repository);
-                        processChanges(preProcessChangeset(repository, refChange, latestRefIds), refChange);
+                // Are we dealing with a new tag/branch or just normal commits?
+                if (isCreated(refChange) || isDeleted(refChange)) {
+                    // Are we dealing with a tag/branch refChange?
+                    if (!refChange.getRefId().contains("refs/tags")) {
+                        // Branch creation
+                        if (isCreated(refChange)) {
+                            //log.info("Branch Creation event occurred.");
+                            sendBranchChangeMessage("created", refChange, repository);
+                            processChanges(preProcessChangeset(repository, refChange, latestRefIds), refChange);
+                        }
+                        // Branch deletion
+                        else if (isDeleted(refChange)) {
+                            //log.info("Branch Deletion event occurred.");
+                            sendBranchChangeMessage("deleted", refChange, repository);
+                        }
                     }
-                    // Branch deletion
-                    else if(isDeleted(refChange)) {
-                        sendBranchChangeMessage("deleted", refChange, repository);
+                    // Tag refChange
+                    else if (refChange.getRefId().contains("refs/tags")) {
+                        // Tag creation
+                        if (isCreated(refChange)) {
+                            //log.info("Tag Creation event occurred.");
+                            sendTagMessage("created", refChange, repository, latestRefIds);
+                        }
+                        // Tag deletion
+                        else if (isDeleted(refChange)) {
+                            //log.info("Tag deletion event occurred.");
+                            sendTagMessage("deleted", refChange, repository, latestRefIds);
+                        }
                     }
                 }
-                // Tag refChange
-                else if(refChange.getRefId().contains("refs/tags")){
-                    // Tag creation
-                    if(isCreated(refChange)) {
-                        sendTagMessage("created", refChange, repository, latestRefIds);
-                    }
-                    // Tag deletion
-                    else if(isDeleted(refChange)) {
-                        sendTagMessage("deleted", refChange, repository, latestRefIds);
-                    }
+                // This is just new commits (or a merge commit), no tags or branches.
+                else {
+                    processChanges(preProcessChangeset(repository, refChange, latestRefIds), refChange);
                 }
             }
-            // This is just new commits (or a merge commit), no tags or branches.
-            else {
-                processChanges(preProcessChangeset(repository, refChange, latestRefIds), refChange);
-            }
+        } catch (Exception e){
+            sendMail("An error was produced by the refChange listener " + e.getMessage());
         }
     }
 
@@ -320,71 +419,85 @@ public class FedmsgEventListener {
      */
     public HashMap<String, Object> prExtracter (PullRequestEvent event)
     {
-        PullRequest pr = event.getPullRequest();
+        //log.info("Collecting relevant information for Pull Request event.");
+            PullRequest pr = event.getPullRequest();
         // Time format bits.
         TimeZone tz = TimeZone.getTimeZone("UTC");
-        DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm'Z'");
+        DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
         df.setTimeZone(tz);
 
         // Extract information from the PR event
         HashMap<String, String> author = new HashMap<String, String>(2);
         HashMap<String, Object> message = new HashMap<String, Object>();
+        try {
+            author.put("name", pr.getAuthor().getUser().getDisplayName());
+            author.put("emailAddress", pr.getAuthor().getUser().getEmailAddress());
 
-        author.put("name", pr.getAuthor().getUser().getDisplayName());
-        author.put("emailAddress", pr.getAuthor().getUser().getEmailAddress());
+            Repository originRepo = pr.getFromRef().getRepository();
+            String originProject = pr.getFromRef().getRepository().getProject().getName();
+            Repository destRepo = pr.getToRef().getRepository();
+            String destProject = pr.getToRef().getRepository().getProject().getName();
+            String originProjectKey = pr.getFromRef().getRepository().getProject().getKey();
+            String destProjectKey = pr.getToRef().getRepository().getProject().getKey();
+            Long id = pr.getId();
+            String desc = pr.getDescription();
+            Date date = pr.getCreatedDate();
+            String state = pr.getState().name();
+            Set<PullRequestParticipant> reviewers = pr.getReviewers();
 
-        Repository originRepo = pr.getFromRef().getRepository();
-        String originProject = pr.getFromRef().getRepository().getProject().getName();
-        Repository destRepo = pr.getToRef().getRepository();
-        String destProject = pr.getToRef().getRepository().getProject().getName();
-        String originProjectKey = pr.getFromRef().getRepository().getProject().getKey();
-        String destProjectKey = pr.getToRef().getRepository().getProject().getKey();
-        Long id = pr.getId();
-        String desc = pr.getDescription();
-        Date date = pr.getCreatedDate();
-        String state = pr.getState().name();
-        Set<PullRequestParticipant> reviewers = pr.getReviewers();
+            // Creating the source branch sub dictionary
+            HashMap<String, Object> source = new HashMap<String, Object>();
+            source.put("urls", getCloneUrls(originRepo));
+            source.put("repository", originRepo.getName());
+            source.put("project", originProject);
+            source.put("branch", pr.getFromRef().getDisplayId());
+            source.put("project_key", originProjectKey);
 
-        // Creating the source branch sub dictionary
-        HashMap<String, Object> source = new HashMap<String, Object>();
-        source.put("urls", getCloneUrls(originRepo));
-        source.put("repository", originRepo.getName());
-        source.put("project", originProject);
-        source.put("branch", pr.getFromRef().getDisplayId());
-        source.put("project_key", originProjectKey);
+            // Creating the destination branch dictionary
+            HashMap<String, Object> destination = new HashMap<String, Object>();
+            destination.put("urls", getCloneUrls(destRepo));
+            destination.put("repository", destRepo.getName());
+            destination.put("project", destProject);
+            destination.put("branch", pr.getToRef().getDisplayId());
+            destination.put("project_key", destProjectKey);
 
-        // Creating the destination branch dictionary
-        HashMap<String, Object> destination = new HashMap<String, Object>();
-        destination.put("urls", getCloneUrls(destRepo));
-        destination.put("repository", destRepo.getName());
-        destination.put("project", destProject);
-        destination.put("branch", pr.getFromRef().getDisplayId());
-        destination.put("project_key", destProjectKey);
-
-        // Construct the body of the fedmsg message
-        message.put("author", author);
-        message.put("when_timestamp", df.format(date));
-        message.put("source", source);
-        message.put("destination", destination);
-        message.put("id", id);
-        message.put("description", desc);
-        message.put("state", state);
-        ArrayList<String> reviewerList = new ArrayList<String>(reviewers.size());
-        if (!reviewers.isEmpty()) {
+            // Construct the body of the fedmsg message
+            message.put("author", author);
+            message.put("when_timestamp", df.format(date));
+            message.put("source", source);
+            message.put("destination", destination);
+            message.put("id", id);
+            message.put("description", desc);
+            message.put("state", state);
+            ArrayList<String> reviewerList = new ArrayList<String>(reviewers.size());
+            if (!reviewers.isEmpty()) {
             /* "PullRequestParticipants" are not serializable by JSON (in order to send messages
              * via Fedmsg, the contents of the message must be able to be encoded by JSON)
              * so we need to create a new list of just strings for each reviewer.
              */
-            for (PullRequestParticipant person : reviewers) {
-                reviewerList.add(person.getUser().getDisplayName());
+                for (PullRequestParticipant person : reviewers) {
+                    reviewerList.add(person.getUser().getDisplayName());
+                }
+                message.put("reviewers", reviewerList);
+
             }
-            message.put("reviewers", reviewerList);
-
+        } catch(Exception e) {
+            sendMail("An exception occurred while extracting information from a pull request event " + e.getMessage());
         }
-
         return message;
     }
 
+    public String getProjectKey(PullRequestEvent event)
+    {
+        PullRequest pr = event.getPullRequest();
+        return pr.getFromRef().getRepository().getProject().getKey();
+    }
+
+    public String getRepoName(PullRequestEvent event)
+    {
+        PullRequest pr = event.getPullRequest();
+        return pr.getFromRef().getRepository().getName();
+    }
     /*
      * This method is for constructing the basic pull request event message. It extracts all of the
      * necessary information from the event, and creates a Message object to then send via fedmsg.
@@ -392,11 +505,9 @@ public class FedmsgEventListener {
     public Message getMessage(PullRequestEvent event, String type)
     {
         HashMap<String, Object> content = prExtracter(event);
-        String originProjectKey = ((HashMap<String, Object>)content.get("source")).get("project_key").toString();
-        String originRepo = ((HashMap<String, Object>)content.get("source")).get("repository").toString();
-        String topic = originProjectKey + "." + originRepo + type;
-        Message message = new Message(content, topic);
-        return message;
+        String originProjectKey = getProjectKey(event);
+        String originRepo = getRepoName(event);
+        return new Message(content, originProjectKey + "." + originRepo + type);
     }
 
     /*
@@ -408,8 +519,8 @@ public class FedmsgEventListener {
         PullRequestAction action = event.getAction();
 
         HashMap<String, Object> content = prExtracter(event);
-        String originProjectKey = ((HashMap<String, Object>)content.get("source")).get("project_key").toString();
-        String originRepo = ((HashMap<String, Object>)content.get("source")).get("repository").toString();
+        String originProjectKey = getProjectKey(event);
+        String originRepo = getRepoName(event);
         String topic = "";
         if(action == PullRequestAction.APPROVED){
             topic = originProjectKey + "." + originRepo + ".pullrequest.approved";
@@ -419,8 +530,7 @@ public class FedmsgEventListener {
             topic = originProjectKey + "." + originRepo + ".pullrequest.unapproved";
             content.put("disprover", event.getParticipant().getUser().getDisplayName());
         }
-        Message message = new Message(content, topic);
-        return message;
+        return new Message(content, topic);
     }
 
     /*
@@ -433,8 +543,8 @@ public class FedmsgEventListener {
         Set<StashUser> removed = event.getRemovedReviewers();
 
         HashMap<String, Object> content = prExtracter(event);
-        String originProjectKey = ((HashMap<String, Object>)content.get("source")).get("project_key").toString();
-        String originRepo = ((HashMap<String, Object>)content.get("source")).get("repository").toString();
+        String originProjectKey = getProjectKey(event);
+        String originRepo = getRepoName(event);
 
         if(!added.isEmpty()) {
             ArrayList<String> addedList = new ArrayList<String>(added.size());
@@ -467,8 +577,13 @@ public class FedmsgEventListener {
      */
     @EventListener
     public void merged(PullRequestMergedEvent event) {
-        Message message = getMessage(event,  ".pullrequest.merged");
-        sendMessage(message);
+        //log.info("Pull Request Merged Event occurred.");
+        try {
+            Message message = getMessage(event, ".pullrequest.merged");
+            sendMessage(message);
+        } catch(Exception e) {
+            sendMail("An error occurred while handling a merged pull request event " + e.getMessage());
+        }
     }
 
     /*
@@ -477,8 +592,13 @@ public class FedmsgEventListener {
      */
     @EventListener
     public void opened(PullRequestOpenedEvent event) {
-        Message message = getMessage(event,  ".pullrequest.opened");
-        sendMessage(message);
+        //log.info("Pull Request Opened Event occurred.");
+        try {
+            Message message = getMessage(event, ".pullrequest.opened");
+            sendMessage(message);
+        } catch(Exception e) {
+            sendMail("An error occurred while handling an opened pull request event " + e.getMessage());
+        }
     }
 
     /*
@@ -488,8 +608,13 @@ public class FedmsgEventListener {
      */
     @EventListener
     public void declined(PullRequestDeclinedEvent event) {
-        Message message = getMessage(event,  ".pullrequest.declined");
-        sendMessage(message);
+        //log.info("Pull Request Declined Event occurred.");
+        try {
+            Message message = getMessage(event, ".pullrequest.declined");
+            sendMessage(message);
+        } catch(Exception e) {
+            sendMail("An error occurred while handling a declined pull request event " + e.getMessage());
+        }
     }
 
     /*
@@ -498,8 +623,13 @@ public class FedmsgEventListener {
      */
     @EventListener
     public void approvalStatusChange(PullRequestApprovalEvent event) {
-        Message message = getMessage(event);
-        sendMessage(message);
+        //log.info("Pull Request Approval Event occurred.");
+        try {
+            Message message = getMessage(event);
+            sendMessage(message);
+        } catch(Exception e) {
+            sendMail("An error occurred while handling an approvalStatusChange event " + e.getMessage());
+        }
     }
 
     /*
@@ -508,7 +638,12 @@ public class FedmsgEventListener {
      */
     @EventListener
     public void reviewersModified(PullRequestRolesUpdatedEvent event) {
-        Message message = getMessage(event,  ".pullrequest.reviewersmodified");
-        sendMessage(message);
+        //log.info("Pull Request ReviewersModified Event occurred.");
+        try {
+            Message message = getMessage(event, ".pullrequest.reviewersmodified");
+            sendMessage(message);
+        } catch(Exception e) {
+            sendMail("An error occurred while handling a reviewersModified event " + e.getMessage());
+        }
     }
 }
