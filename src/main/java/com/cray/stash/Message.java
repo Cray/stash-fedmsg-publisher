@@ -17,8 +17,5 @@ public class Message {
         return message;
     }
 
-    public String getTopic() {
-
-        return topic;
-    }
+    public String getTopic() {return topic;}
 }
