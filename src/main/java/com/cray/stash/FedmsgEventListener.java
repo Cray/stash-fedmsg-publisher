@@ -12,6 +12,8 @@ import com.atlassian.stash.pull.PullRequest;
 import com.atlassian.stash.pull.PullRequestAction;
 import com.atlassian.stash.pull.PullRequestParticipant;
 import com.atlassian.stash.repository.*;
+import com.atlassian.stash.user.Permission;
+import com.atlassian.stash.user.SecurityService;
 import com.atlassian.stash.user.StashUser;
 import com.atlassian.stash.util.NamedLink;
 import com.atlassian.stash.util.Page;
@@ -19,6 +21,7 @@ import com.atlassian.stash.util.PageUtils;
 import com.atlassian.stash.server.ApplicationPropertiesService;
 
 // Sending fedmsg messages
+import com.atlassian.stash.util.UncheckedOperation;
 import org.fedoraproject.fedmsg.FedmsgConnection;
 import org.fedoraproject.fedmsg.FedmsgMessage;
 
@@ -27,8 +30,8 @@ import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.*;
 
-//import org.slf4j.Logger;
-//import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 // Sending Emails regarding exceptions
 import javax.mail.MessagingException;
@@ -36,24 +39,40 @@ import javax.mail.Session;
 import javax.mail.Transport;
 import javax.mail.internet.InternetAddress;
 import javax.mail.internet.MimeMessage;
+import javax.validation.constraints.Null;
 
 public class FedmsgEventListener {
     private CommitService commitService;
     private String endpoint;
-    private FedmsgConnection connect;
+    private SecurityService security;
     private RefService repoData;
     private RepositoryService repoService;
     private String topicPrefix;
     private int pageLimit;
-    //private static final Logger log = LoggerFactory.getLogger(FedmsgEventListener.class);
+    private static final Logger log = LoggerFactory.getLogger(FedmsgEventListener.class);
+    private FedmsgConnection connect;
+    private String errorRecipient;
 
-    public FedmsgEventListener(CommitService commitService, RefService repoData, RepositoryService repoService, ApplicationPropertiesService appService) {
+    public FedmsgEventListener(CommitService commitService, RefService repoData, RepositoryService repoService, ApplicationPropertiesService appService, SecurityService security) {
         //log.info("Initializing FedmsgEventListerner plugin...");
         this.commitService = commitService;
         this.repoData = repoData;
         this.repoService = repoService;
-        //This is the address of the relay_inbound
+        this.security = security;
+
         try {
+            errorRecipient = appService.getPluginProperty("plugin.fedmsg.mailRecipient");
+        } catch(Exception e) {
+            e.printStackTrace();
+        }
+
+        if(errorRecipient == null){
+            errorRecipient = "ci-info@cray.com";
+            sendMail("The error email recipient was not set so using ci-info as a default.");
+        }
+
+        try {
+            //This is the address of the relay_inbound
             endpoint = appService.getPluginProperty("plugin.fedmsg.events.relay.endpoint");
             //log.info("Relay endpoint: " + endpoint);
             // The connection to that endpoint
@@ -63,15 +82,25 @@ public class FedmsgEventListener {
         } catch (Exception e) {
             sendMail("Failed to retrieve properties " + e.getMessage());
         }
-
         try {
-            this.connect = new FedmsgConnection(endpoint, 2000).connect();
-            //log.info("FedmsgEventListener plugin initialized successfully!");
+            connect = new FedmsgConnection(endpoint, 2000).connect();
         } catch (Exception e) {
-            sendMail("Failed to connect to fedmsg relay" + e.getMessage());
+            sendMail("Failed to connect to relay: " + e.getMessage());
+        }
+
+        if(endpoint == null) {
+            endpoint = "tcp://bit01.us.cray.com:9941";
+            sendMail("The endpoint value was not set. Using the default bit01 relay.");
+        }
+        if(topicPrefix == null){
+            topicPrefix = "com.cray.dev.stash.";
+            sendMail("The topic prefix was empty so it's set to the dev environment by default.");
+        }
+        if(pageLimit == 0) {
+            pageLimit = 250;
+            sendMail("The pagelimit was not set so it's set to 250 by default.");
         }
     }
-
     /*
      * These are helper methods to determine if a branch is newly created or deleted.
      */
@@ -118,17 +147,17 @@ public class FedmsgEventListener {
         try {
             connect.send(msg);
         } catch (IOException e) {
-            sendMail("Encountered IOException when sending a fedmsg msg" + e);
+            sendMail("Encountered IOException when sending a fedmsg msg: " + e.getMessage() + "\nMessage: " + msg);
         } catch (Exception e) {
-            sendMail("Encountered an error when sending a fedmsg msg" + e);
+            sendMail("Encountered an error when sending a fedmsg msg: " + e.getMessage() + "\nMessage: " + msg);
         }
-    }
+}
     /*
      *  This method is used to send email to ci-info in the event that an exception was
      *  encountered somewhere in the plugin.
      */
     public void sendMail(String email) {
-        String to = "ci-info@cray.com";
+        String to = errorRecipient;
         String from = "build@cray.com";
         String host = "relaya.us.cray.com";
         Properties properties = System.getProperties();
@@ -152,7 +181,6 @@ public class FedmsgEventListener {
 
             // Send message
             Transport.send(message);
-            System.out.println("Sent message successfully....");
         } catch (MessagingException mex) {
             mex.printStackTrace();
         }
@@ -174,7 +202,7 @@ public class FedmsgEventListener {
 
         } catch (Exception e)
         {
-            sendMail("Error while scraping for branch change information " + e.getMessage());
+            sendMail("Error while scraping for branch change information: " + e.getMessage() + "\ntopic: " + topic);
         }
         Message message = new Message(content, topic);
         sendMessage(message);
@@ -187,6 +215,7 @@ public class FedmsgEventListener {
     {
         String topic = repo.getProject().getKey() + "." + repo.getName() + ".tag." + state;
         HashMap<String, Object> content = new HashMap<String, Object>();
+        HashMap<String, String> author = new HashMap<String, String>(2);
         TimeZone tz = TimeZone.getTimeZone("UTC");
         DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
         df.setTimeZone(tz);
@@ -200,12 +229,14 @@ public class FedmsgEventListener {
             content.put("revision", ref.getToHash());
             content.put("state", state);
             if(tagCommits.size() > 0) {
-                content.put("author", tagCommits.get(0).getAuthor());
+                author.put("name", tagCommits.get(0).getAuthor().getName());
+                author.put("emailAdress", tagCommits.get(0).getAuthor().getEmailAddress());
+                content.put("author", author);
                 content.put("tag message", tagCommits.get(0).getMessage());
                 content.put("when_timestamp", df.format(tagCommits.get(0).getAuthorTimestamp()));
             }
         } catch(Exception e) {
-            sendMail("Error while scraping for tag change information " + e.getMessage());
+            sendMail("Error while scraping for tag change information: " + e.getMessage() + "\ntopic: " + topic);
         }
         Message message = new Message(content, topic);
         sendMessage(message);
@@ -244,7 +275,7 @@ public class FedmsgEventListener {
                 }
             }
         } catch(Exception e) {
-            sendMail("Error while finding new commits from a refChange " + e.getMessage());
+            sendMail("Error while finding new commits from a refChange: " + e.getMessage());
         }
         //log.info("Found the latest commits: " + newCommits);
         return newCommits;
@@ -259,8 +290,14 @@ public class FedmsgEventListener {
                 .build();
         HashMap<String, String> links = new HashMap<String, String>(2);
         try {
-            Set<NamedLink> setLinks = repoService.getCloneLinks(linksRequest);
-            for(NamedLink link: setLinks) {
+            Set<NamedLink> setLinks = security.withPermission(Permission.ADMIN, "Requesting Clone URLs").call(new UncheckedOperation<Set<NamedLink>>() {
+                @Override
+                public Set<NamedLink> perform() {
+                    Set<NamedLink> setLinks = repoService.getCloneLinks(linksRequest);
+                    return setLinks;
+                }
+            });
+       for(NamedLink link: setLinks) {
                 if(link.getHref().contains("https://")) {
                     links.put(link.getName() + "_url", "https://" + link.getHref().substring(link.getHref().indexOf("@") + 1));
                 }
@@ -273,9 +310,11 @@ public class FedmsgEventListener {
                 }
             }
         } catch(AuthorisationException e) {
-            sendMail("An authorisation error occurred " + e.getMessage());
+            sendMail("An authorisation error occurred: " + e.getMessage() + "\nUser: ");
+        } catch (IllegalStateException e) {
+            sendMail("There was a problem escalating the permissions of the current user: " + e.getMessage());
         } catch(Exception e){
-            sendMail("An error occurred while getting  clone urls " + e.getMessage());
+            sendMail("An error occurred while getting clone urls: " + e.getMessage());
         }
         return links;
     }
@@ -306,7 +345,7 @@ public class FedmsgEventListener {
             content.put("branch", branch);
             content.put("files", files);
         } catch (Exception e) {
-            sendMail("An error occured while extracing information from a refchange " + e.getMessage());
+            sendMail("An error ocurred while extracing information from a refchange: " + e.getMessage());
         }
         return content;
     }
@@ -339,9 +378,9 @@ public class FedmsgEventListener {
             }
 
         } catch (NullPointerException e){
-            sendMail("A NullPointerException occurred while processing changes " + e.getMessage());
+            sendMail("A NullPointerException occurred while processing changes: " + e.getMessage());
         } catch(Exception e){
-            sendMail("An error occurred while parsing new commits " + e.getMessage());
+            sendMail("An error occurred while parsing new commits: " + e.getMessage());
         }
 
         ListIterator<HashMap<String, Object>> li = toSend.listIterator(toSend.size());
@@ -355,7 +394,7 @@ public class FedmsgEventListener {
                 messageList.add(message);
             }
         } catch(Exception e){
-            sendMail("An error occurred while sending all the new commits to fedmsg " + e.getMessage());
+            sendMail("An error occurred while sending all the new commits to fedmsg: " + e.getMessage());
         }
         return messageList;
     }
@@ -410,7 +449,7 @@ public class FedmsgEventListener {
                 }
             }
         } catch (Exception e){
-            sendMail("An error was produced by the refChange listener " + e.getMessage());
+            sendMail("An error was produced by the refChange listener: " + e.getMessage());
         }
     }
 
@@ -483,7 +522,7 @@ public class FedmsgEventListener {
 
             }
         } catch(Exception e) {
-            sendMail("An exception occurred while extracting information from a pull request event " + e.getMessage());
+            sendMail("An exception occurred while extracting information from a pull request event: " + e.getMessage());
         }
         return message;
     }
@@ -583,7 +622,7 @@ public class FedmsgEventListener {
             Message message = getMessage(event, ".pullrequest.merged");
             sendMessage(message);
         } catch(Exception e) {
-            sendMail("An error occurred while handling a merged pull request event " + e.getMessage());
+            sendMail("An error occurred while handling a merged pull request event: " + e.getMessage());
         }
     }
 
@@ -598,7 +637,7 @@ public class FedmsgEventListener {
             Message message = getMessage(event, ".pullrequest.opened");
             sendMessage(message);
         } catch(Exception e) {
-            sendMail("An error occurred while handling an opened pull request event " + e.getMessage());
+            sendMail("An error occurred while handling an opened pull request event: " + e.getMessage());
         }
     }
 
@@ -614,7 +653,7 @@ public class FedmsgEventListener {
             Message message = getMessage(event, ".pullrequest.declined");
             sendMessage(message);
         } catch(Exception e) {
-            sendMail("An error occurred while handling a declined pull request event " + e.getMessage());
+            sendMail("An error occurred while handling a declined pull request event: " + e.getMessage());
         }
     }
 
@@ -629,7 +668,7 @@ public class FedmsgEventListener {
             Message message = getMessage(event);
             sendMessage(message);
         } catch(Exception e) {
-            sendMail("An error occurred while handling an approvalStatusChange event " + e.getMessage());
+            sendMail("An error occurred while handling an approvalStatusChange event: " + e.getMessage());
         }
     }
 
@@ -644,7 +683,7 @@ public class FedmsgEventListener {
             Message message = getMessage(event, ".pullrequest.reviewersmodified");
             sendMessage(message);
         } catch(Exception e) {
-            sendMail("An error occurred while handling a reviewersModified event " + e.getMessage());
+            sendMail("An error occurred while handling a reviewersModified event: " + e.getMessage());
         }
     }
 }
