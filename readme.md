@@ -1,13 +1,7 @@
-You have successfully created an Atlassian Plugin!
+Stash Fedmsg Plugin
+===================
 
-Here are the SDK commands you'll use immediately:
+This is the repository for the plugin that takes data from events in Stash (commits, tag/branch creation,
+pull requests) and prints data regarding them to a fedmsg bus for anyone to use. 
 
-* atlas-run   -- installs this plugin into the product and starts it on localhost
-* atlas-debug -- same as atlas-run, but allows a debugger to attach at port 5005
-* atlas-cli   -- after atlas-run or atlas-debug, opens a Maven command line window:
-                 - 'pi' reinstalls the plugin into the running product instance
-* atlas-help  -- prints description for all commands in the SDK
-
-Full documentation is always available at:
-
-https://developer.atlassian.com/display/DOCS/Introduction+to+the+Atlassian+Plugin+SDK
+The entry level for the code is any method marked with an "@EventListener" tag. 
