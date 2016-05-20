@@ -6,7 +6,7 @@
 
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.cray.stash</groupId>
-    <artifactId>fedmsg.events</artifactId>
+    <artifactId>events</artifactId>
     <version>1.1.2</version>
 
     <organization>
@@ -14,7 +14,7 @@
         <url>http://www.cray.com/</url>
     </organization>
 
-    <name>Fedmsg Events</name>
+    <name>Stash Event Publisher</name>
     <description>This plugin enables fedmsg messaging for a multitude of stash events such as commits, branch creation, pull request creation, and much more</description>
     <packaging>atlassian-plugin</packaging>
 
