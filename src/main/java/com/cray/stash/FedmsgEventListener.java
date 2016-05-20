@@ -6,6 +6,7 @@ import com.atlassian.stash.commit.CommitService;
 import com.atlassian.stash.content.*;
 import com.atlassian.stash.commit.*;
 import com.atlassian.stash.event.RepositoryRefsChangedEvent;
+import com.atlassian.stash.repository.RefChangeType;
 import com.atlassian.stash.event.pull.*;
 import com.atlassian.stash.exception.AuthorisationException;
 import com.atlassian.stash.pull.PullRequest;
@@ -53,7 +54,7 @@ public class FedmsgEventListener {
     private String errorRecipient;
 
     public FedmsgEventListener(CommitService commitService, RefService repoData, RepositoryService repoService, ApplicationPropertiesService appService, SecurityService security) {
-        //log.info("Initializing FedmsgEventListerner plugin...");
+        log.info("Initializing FedmsgEventListerner plugin...");
         this.commitService = commitService;
         this.repoData = repoData;
         this.repoService = repoService;
@@ -61,51 +62,52 @@ public class FedmsgEventListener {
 
         try {
             errorRecipient = appService.getPluginProperty("plugin.fedmsg.mailRecipient");
-        } catch(Exception e) {
+        } catch (Exception e) {
             e.printStackTrace();
         }
 
-        if(errorRecipient == null){
+        if (errorRecipient == null) {
             errorRecipient = "ci-info@cray.com";
-            sendMail("The error email recipient was not set so using ci-info as a default.");
+            log.info("The error email recipient was not set so using ci-info as a default.");
         }
 
         try {
-            //This is the address of the relay_inbound
             endpoint = appService.getPluginProperty("plugin.fedmsg.events.relay.endpoint");
-            //log.info("Relay endpoint: " + endpoint);
-            // The connection to that endpoint
             topicPrefix = appService.getPluginProperty("plugin.fedmsg.events.topic.prefix");
-            //log.info("Topic prefix: " + topicPrefix);
             pageLimit = Integer.parseInt(appService.getPluginProperty("plugin.fedmsg.pageLimit"));
         } catch (Exception e) {
-            sendMail("Failed to retrieve properties " + e.getMessage());
+            log.error("Failed to retrieve properties " + e.getMessage());
         }
+
+        if (endpoint == null) {
+            endpoint = "tcp://bit01.us.cray.com:9941";
+            log.info("The endpoint value was not set. Using the default bit01 relay.");
+        }
+
         try {
             connect = new FedmsgConnection(endpoint, 2000).connect();
         } catch (Exception e) {
-            sendMail("Failed to connect to relay: " + e.getMessage());
+            log.error("Failed to connect to relay: " + e.getMessage());
         }
 
-        if(endpoint == null) {
-            endpoint = "tcp://bit01.us.cray.com:9941";
-            sendMail("The endpoint value was not set. Using the default bit01 relay.");
-        }
-        if(topicPrefix == null){
+        if (topicPrefix == null) {
             topicPrefix = "com.cray.dev.stash.";
-            sendMail("The topic prefix was empty so it's set to the dev environment by default.");
+            log.info("The topic prefix was empty so it's set to the dev environment by default.");
         }
-        if(pageLimit == 0) {
+
+        if (pageLimit == 0) {
             pageLimit = 250;
-            sendMail("The pagelimit was not set so it's set to 250 by default.");
+            log.info("The pagelimit was not set so it's set to 250 by default.");
         }
     }
+
     /*
      * These are helper methods to determine if a branch is newly created or deleted.
      */
     private boolean isCreated(RefChange ref) {
         return ref.getFromHash().contains("0000000000000000000000000000000000000000");
     }
+
     private boolean isDeleted(RefChange ref) {
         return ref.getToHash().contains("0000000000000000000000000000000000000000");
     }
@@ -125,10 +127,11 @@ public class FedmsgEventListener {
                     refIds.add(branch.getLatestCommit());
                 }
             }
-        } catch(Exception e) {
-            sendMail("An error occurred while finding all the latest refIds for each branch in a repo " + e.getMessage());
+        } catch (Exception e) {
+            log.error("An error occurred while finding the latest refIds for each branch in a repo: " + e.getMessage() +
+                    " The error occurred while analyzing ref " + ref.getToHash() + " type: " + ref.getType());
         }
-        //log.info("Found the latest refs: " + refIds);
+        log.debug("Found the latest refs: " + refIds);
         return refIds;
     }
 
@@ -137,7 +140,7 @@ public class FedmsgEventListener {
      * a specified topic and prepends an topic prefix, environment, and modname.
      */
     private void sendMessage(Message message) {
-        //log.info("Sending fedmsg message...");
+        log.debug("Sending fedmsg message...");
         FedmsgMessage msg = new FedmsgMessage(
                 message.getMessage(),
                 (topicPrefix + message.getTopic()).toLowerCase(),
@@ -146,16 +149,17 @@ public class FedmsgEventListener {
         try {
             connect.send(msg);
         } catch (IOException e) {
-            sendMail("Encountered IOException when sending a fedmsg msg: " + e.getMessage() + "\nMessage: " + msg);
+            log.error("IOException occurred when sending fedmsg message: " + e.getMessage());
         } catch (Exception e) {
-            sendMail("Encountered an error when sending a fedmsg msg: " + e.getMessage() + "\nMessage: " + msg);
+            log.error("Exception occurred when sending fedmsg message: " + e.getMessage());
         }
-}
+    }
+
     /*
      *  This method is used to send email to ci-info in the event that an exception was
      *  encountered somewhere in the plugin.
      */
-    public void sendMail(String email) {
+    public void sendmail(String email) {
         String to = errorRecipient;
         String from = "build@cray.com";
         String host = "relaya.us.cray.com";
@@ -199,9 +203,8 @@ public class FedmsgEventListener {
             content.put("state", state);
             repo.getProject().getKey();
 
-        } catch (Exception e)
-        {
-            sendMail("Error while scraping for branch change information: " + e.getMessage() + "\ntopic: " + topic);
+        } catch (Exception e) {
+            //sendmail("Error while scraping for branch change information: " + e.getMessage() + "\ntopic: " + topic);
         }
         Message message = new Message(content, topic);
         sendMessage(message);
@@ -210,8 +213,7 @@ public class FedmsgEventListener {
     /*
      * This method processes the creation/deletion of a tag and sends a Fedmsg message regarding that.
      */
-    private void sendTagMessage(String state, RefChange ref, Repository repo, HashSet<String> latestRefIds)
-    {
+    private void sendTagMessage(String state, RefChange ref, Repository repo, HashSet<String> latestRefIds) {
         String topic = repo.getProject().getKey() + "." + repo.getName() + ".tag." + state;
         HashMap<String, Object> content = new HashMap<String, Object>();
         HashMap<String, String> author = new HashMap<String, String>(2);
@@ -227,15 +229,15 @@ public class FedmsgEventListener {
             content.put("urls", getCloneUrls(repo));
             content.put("revision", ref.getToHash());
             content.put("state", state);
-            if(tagCommits.size() > 0) {
+            if (tagCommits.size() > 0) {
                 author.put("name", tagCommits.get(0).getAuthor().getName());
                 author.put("emailAdress", tagCommits.get(0).getAuthor().getEmailAddress());
                 content.put("author", author);
                 content.put("tag message", tagCommits.get(0).getMessage());
                 content.put("when_timestamp", df.format(tagCommits.get(0).getAuthorTimestamp()));
             }
-        } catch(Exception e) {
-            sendMail("Error while scraping for tag change information: " + e.getMessage() + "\ntopic: " + topic);
+        } catch (Exception e) {
+            //sendmail("Error while scraping for tag change information: " + e.getMessage() + "\ntopic: " + topic);
         }
         Message message = new Message(content, topic);
         sendMessage(message);
@@ -258,7 +260,6 @@ public class FedmsgEventListener {
      * upstream.
      */
     private ArrayList<Commit> preProcessChangeset(Repository repo, RefChange ref, HashSet<String> latestRefIds) {
-        //log.info("Finding latest commits on given ref.");
         // List of messages to send across the fedmsg bus that have not already been processed
         ArrayList<Commit> newCommits = new ArrayList<Commit>();
 
@@ -273,10 +274,11 @@ public class FedmsgEventListener {
                     newCommits.add(commit);
                 }
             }
-        } catch(Exception e) {
-            sendMail("Error while finding new commits from a refChange: " + e.getMessage());
+        } catch (Exception e) {
+            log.error("Error while finding new commits from a refChange: " + ref.getRefId() + "\nMessage: " + e.getMessage()
+                    + "\nfromHash: " + ref.getFromHash() + "\ntoHash: " + ref.getToHash() + "\ntype: " + ref.getType());
         }
-        //log.info("Found the latest commits: " + newCommits);
+        log.debug("Found the latest commits: " + newCommits);
         return newCommits;
     }
 
@@ -296,24 +298,21 @@ public class FedmsgEventListener {
                     return setLinks;
                 }
             });
-       for(NamedLink link: setLinks) {
-                if(link.getHref().contains("https://")) {
+            for (NamedLink link : setLinks) {
+                if (link.getHref().contains("https://")) {
                     links.put(link.getName() + "_url", "https://" + link.getHref().substring(link.getHref().indexOf("@") + 1));
-                }
-                else if (link.getHref().contains("http://"))
-                {
+                } else if (link.getHref().contains("http://")) {
                     links.put(link.getName() + "_url", "http://" + link.getHref().substring(link.getHref().indexOf("@") + 1));
-                }
-                else {
+                } else {
                     links.put(link.getName() + "_url", link.getHref());
                 }
             }
-        } catch(AuthorisationException e) {
-            sendMail("An authorisation error occurred: " + e.getMessage() + "\nUser: ");
+        } catch (AuthorisationException e) {
+            log.error("AuthorisationException occurred while finding clone urls: " + e.getMessage());
         } catch (IllegalStateException e) {
-            sendMail("There was a problem escalating the permissions of the current user: " + e.getMessage());
-        } catch(Exception e){
-            sendMail("An error occurred while getting clone urls: " + e.getMessage());
+            log.error("IllegalStateException occurred while finding clone urls: " + e.getMessage());
+        } catch (Exception e) {
+            log.error("Exception occurred while finding clone urls: " + e.getMessage());
         }
         return links;
     }
@@ -322,8 +321,7 @@ public class FedmsgEventListener {
      * This method takes an individual commit object, and extracts the information from it that we want to send to
      * Fedmsg. This method is for use with the pushEvent method, so strictly refChanges.
      */
-    private HashMap<String, Object> refChangeExtracter(Commit commit, ArrayList<String> files, String branch)
-    {
+    private HashMap<String, Object> refChangeExtracter(Commit commit, ArrayList<String> files, String branch) {
         TimeZone tz = TimeZone.getTimeZone("UTC");
         DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
         df.setTimeZone(tz);
@@ -344,7 +342,8 @@ public class FedmsgEventListener {
             content.put("branch", branch);
             content.put("files", files);
         } catch (Exception e) {
-            sendMail("An error ocurred while extracing information from a refchange: " + e.getMessage());
+            log.error("Exception occurred while extracting information from a commit object. Commit Message: " + commit.getMessage()
+                    + " author: " + commit.getAuthor().getName() + " commit id: " + commit.getDisplayId() + "\nMessage: " + e.getMessage());
         }
         return content;
     }
@@ -353,9 +352,7 @@ public class FedmsgEventListener {
      * This method takes an ArrayList of commits (in between two ref Changes) and constructs a list of
      * message to send. All commits in the ArrayList should be new commits.
      */
-    private ArrayList<Message> processChanges(ArrayList<Commit> commits, RefChange ref)
-    {
-        //log.info("Collecting relevant information for  given refChange event");
+    private ArrayList<Message> processChanges(ArrayList<Commit> commits, RefChange ref) {
         //list of messages to send across the fedmsg bus
         ArrayList<HashMap<String, Object>> toSend = new ArrayList<HashMap<String, Object>>();
 
@@ -376,10 +373,12 @@ public class FedmsgEventListener {
                 toSend.add(refChangeExtracter(commits.get(i), filesChanged, ref.getRefId().substring(11)));
             }
 
-        } catch (NullPointerException e){
-            sendMail("A NullPointerException occurred while processing changes: " + e.getMessage());
-        } catch(Exception e){
-            sendMail("An error occurred while parsing new commits: " + e.getMessage());
+        } catch (NullPointerException e) {
+            log.error("NullPointerException was caught when processing commits from ref: " + ref.getRefId() + "\nMessage: " + e.getMessage()
+                    + "\nfromHash: " + ref.getFromHash() + "\ntoHash: " + ref.getToHash() + "\ntype: " + ref.getType());
+        } catch (Exception e) {
+            log.error("Exception was caught when processing commits from ref: " + ref.getRefId() + "\nMessage: " + e.getMessage()
+                    + "\nfromHash: " + ref.getFromHash() + "\ntoHash: " + ref.getToHash() + "\ntype: " + ref.getType());
         }
 
         ListIterator<HashMap<String, Object>> li = toSend.listIterator(toSend.size());
@@ -392,8 +391,9 @@ public class FedmsgEventListener {
                 sendMessage(message);
                 messageList.add(message);
             }
-        } catch(Exception e){
-            sendMail("An error occurred while sending all the new commits to fedmsg: " + e.getMessage());
+        } catch (Exception e) {
+            log.error("Exception was caught was caught while sending all new commits to fedmsg. Ref: " + ref.getRefId() + "\nMessage: " + e.getMessage()
+                    + "\nfromHash: " + ref.getFromHash() + "\ntoHash: " + ref.getToHash() + "\ntype: " + ref.getType());
         }
         return messageList;
     }
@@ -404,13 +404,25 @@ public class FedmsgEventListener {
      */
     @EventListener
     public void refChangeListener(RepositoryRefsChangedEvent event) {
-        //log.info("RefChange event occurred.");
+        log.info("RefChange event occurred.");
         try {
             Collection<RefChange> refChanges = event.getRefChanges();
             Repository repository = event.getRepository();
 
             for (RefChange refChange : refChanges) {
+                log.debug("checking ref change refId={} fromHash={} toHash={} type={}", refChange.getRefId(), refChange.getFromHash(),
+                        refChange.getToHash(), refChange.getType());
                 HashSet<String> latestRefIds = getLatestRefs(repository, refChange);
+
+                if (refChange.getRefId().startsWith("refs/notes")) {
+                    log.debug("Skipping git notes.");
+                    continue;
+                }
+
+                if (refChange.getType() == RefChangeType.ADD && isDeleted(refChange)) {
+                    log.debug("Deleted a ref that never existed. This shouldn't ever occur.");
+                    continue;
+                }
 
                 // Are we dealing with a new tag/branch or just normal commits?
                 if (isCreated(refChange) || isDeleted(refChange)) {
@@ -418,14 +430,15 @@ public class FedmsgEventListener {
                     if (!refChange.getRefId().contains("refs/tags")) {
                         // Branch creation
                         if (isCreated(refChange)) {
-                            //log.info("Branch Creation event occurred.");
-                            sendBranchChangeMessage("created", refChange, repository);
+                            log.debug("Branch Creation event occurred. Possible new commits on this branch.");
+                            //sendBranchChangeMessage("created", refChange, repository);
                             processChanges(preProcessChangeset(repository, refChange, latestRefIds), refChange);
                         }
                         // Branch deletion
                         else if (isDeleted(refChange)) {
                             //log.info("Branch Deletion event occurred.");
-                            sendBranchChangeMessage("deleted", refChange, repository);
+                            //sendBranchChangeMessage("deleted", refChange, repository);
+                            continue;
                         }
                     }
                     // Tag refChange
@@ -433,12 +446,14 @@ public class FedmsgEventListener {
                         // Tag creation
                         if (isCreated(refChange)) {
                             //log.info("Tag Creation event occurred.");
-                            sendTagMessage("created", refChange, repository, latestRefIds);
+                            //sendTagMessage("created", refChange, repository, latestRefIds);
+                            continue;
                         }
                         // Tag deletion
                         else if (isDeleted(refChange)) {
                             //log.info("Tag deletion event occurred.");
-                            sendTagMessage("deleted", refChange, repository, latestRefIds);
+                            //sendTagMessage("deleted", refChange, repository, latestRefIds);
+                            continue;
                         }
                     }
                 }
@@ -447,8 +462,9 @@ public class FedmsgEventListener {
                     processChanges(preProcessChangeset(repository, refChange, latestRefIds), refChange);
                 }
             }
-        } catch (Exception e){
-            sendMail("An error was produced by the refChange listener: " + e.getMessage());
+        } catch (Exception e) {
+            log.error("An error was produced by the refChange listener. message: {} repository: {} user: {}",
+                    e.getMessage(), event.getRepository().getName(), event.getUser().getName());
         }
     }
 
@@ -456,10 +472,9 @@ public class FedmsgEventListener {
      * This method extracts all the relevant information from a pull request event and packages it into
      * a HashMap for usage with the Fedmsg commands. It is similar to the refChangeExtracter.
      */
-    public HashMap<String, Object> prExtracter (PullRequestEvent event)
-    {
+    public HashMap<String, Object> prExtracter(PullRequestEvent event) {
         //log.info("Collecting relevant information for Pull Request event.");
-            PullRequest pr = event.getPullRequest();
+        PullRequest pr = event.getPullRequest();
         // Time format bits.
         TimeZone tz = TimeZone.getTimeZone("UTC");
         DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
@@ -520,29 +535,27 @@ public class FedmsgEventListener {
                 message.put("reviewers", reviewerList);
 
             }
-        } catch(Exception e) {
-            sendMail("An exception occurred while extracting information from a pull request event: " + e.getMessage());
+        } catch (Exception e) {
+            //sendmail("An exception occurred while extracting information from a pull request event: " + e.getMessage());
         }
         return message;
     }
 
-    public String getProjectKey(PullRequestEvent event)
-    {
+    public String getProjectKey(PullRequestEvent event) {
         PullRequest pr = event.getPullRequest();
         return pr.getFromRef().getRepository().getProject().getKey();
     }
 
-    public String getRepoName(PullRequestEvent event)
-    {
+    public String getRepoName(PullRequestEvent event) {
         PullRequest pr = event.getPullRequest();
         return pr.getFromRef().getRepository().getName();
     }
+
     /*
      * This method is for constructing the basic pull request event message. It extracts all of the
      * necessary information from the event, and creates a Message object to then send via fedmsg.
      */
-    public Message getMessage(PullRequestEvent event, String type)
-    {
+    public Message getMessage(PullRequestEvent event, String type) {
         HashMap<String, Object> content = prExtracter(event);
         String originProjectKey = getProjectKey(event);
         String originRepo = getRepoName(event);
@@ -553,19 +566,17 @@ public class FedmsgEventListener {
      * This getMessage method handles when the approval status changes. Depending on the event
      * the topic needs to change and also the content of the message.
      */
-    public Message getMessage(PullRequestApprovalEvent event)
-    {
+    public Message getMessage(PullRequestApprovalEvent event) {
         PullRequestAction action = event.getAction();
 
         HashMap<String, Object> content = prExtracter(event);
         String originProjectKey = getProjectKey(event);
         String originRepo = getRepoName(event);
         String topic = "";
-        if(action == PullRequestAction.APPROVED){
+        if (action == PullRequestAction.APPROVED) {
             topic = originProjectKey + "." + originRepo + ".pullrequest.approved";
             content.put("approver", event.getParticipant().getUser().getDisplayName());
-        }
-        else if(action == PullRequestAction.UNAPPROVED) {
+        } else if (action == PullRequestAction.UNAPPROVED) {
             topic = originProjectKey + "." + originRepo + ".pullrequest.unapproved";
             content.put("disprover", event.getParticipant().getUser().getDisplayName());
         }
@@ -576,8 +587,7 @@ public class FedmsgEventListener {
      * This getMessage method handles specific reviewersmodified event. It needs to
      * extract a list of reviewers added and removed and append that to the message.
      */
-    public Message getMessage(PullRequestRolesUpdatedEvent event, String type)
-    {
+    public Message getMessage(PullRequestRolesUpdatedEvent event, String type) {
         Set<StashUser> added = event.getAddedReviewers();
         Set<StashUser> removed = event.getRemovedReviewers();
 
@@ -585,16 +595,16 @@ public class FedmsgEventListener {
         String originProjectKey = getProjectKey(event);
         String originRepo = getRepoName(event);
 
-        if(!added.isEmpty()) {
+        if (!added.isEmpty()) {
             ArrayList<String> addedList = new ArrayList<String>(added.size());
-            for(StashUser user: added) {
+            for (StashUser user : added) {
                 addedList.add(user.getDisplayName());
             }
             content.put("reviewers_added", addedList);
         }
-        if(!removed.isEmpty()) {
+        if (!removed.isEmpty()) {
             ArrayList<String> removedList = new ArrayList<String>(removed.size());
-            for(StashUser user: removed) {
+            for (StashUser user : removed) {
                 removedList.add(user.getDisplayName());
             }
             content.put("reviewers_removed", removedList);
@@ -614,75 +624,75 @@ public class FedmsgEventListener {
      * This event fires when someone hits the "merge" button on an open pull request. It sends a Fedmsg
      * message to the relevant topic about this event.
      */
-    @EventListener
-    public void merged(PullRequestMergedEvent event) {
-        //log.info("Pull Request Merged Event occurred.");
-        try {
-            Message message = getMessage(event, ".pullrequest.merged");
-            sendMessage(message);
-        } catch(Exception e) {
-            sendMail("An error occurred while handling a merged pull request event: " + e.getMessage());
-        }
-    }
-
-    /*
-     * This event fires when someone opens a pull request and sends a Fedmsg message to a relevant topic
-     * about the event.
-     */
-    @EventListener
-    public void opened(PullRequestOpenedEvent event) {
-        //log.info("Pull Request Opened Event occurred.");
-        try {
-            Message message = getMessage(event, ".pullrequest.opened");
-            sendMessage(message);
-        } catch(Exception e) {
-            sendMail("An error occurred while handling an opened pull request event: " + e.getMessage());
-        }
-    }
-
-    /*
-     * This event fires if someone declines the pull request. It also sends a Fedmsg message to the relevant
-     * topic. For some reason, this event doesn't store who did the approving, so that is not part of the
-     * message.
-     */
-    @EventListener
-    public void declined(PullRequestDeclinedEvent event) {
-        //log.info("Pull Request Declined Event occurred.");
-        try {
-            Message message = getMessage(event, ".pullrequest.declined");
-            sendMessage(message);
-        } catch(Exception e) {
-            sendMail("An error occurred while handling a declined pull request event: " + e.getMessage());
-        }
-    }
-
-    /*
-     * This event fires when the approval status of a pull request changes. It sends a Fedmsg message to
-     * the relevant topic and adds in who is responsible for the change in status.
-     */
-    @EventListener
-    public void approvalStatusChange(PullRequestApprovalEvent event) {
-        //log.info("Pull Request Approval Event occurred.");
-        try {
-            Message message = getMessage(event);
-            sendMessage(message);
-        } catch(Exception e) {
-            sendMail("An error occurred while handling an approvalStatusChange event: " + e.getMessage());
-        }
-    }
-
-    /*
-     * This event fires when reviewers for a pull request are modified and sends a Fedmsg message to
-     * the relevant topic with a list of the newly added or recently deleted reviewer(s).
-     */
-    @EventListener
-    public void reviewersModified(PullRequestRolesUpdatedEvent event) {
-        //log.info("Pull Request ReviewersModified Event occurred.");
-        try {
-            Message message = getMessage(event, ".pullrequest.reviewersmodified");
-            sendMessage(message);
-        } catch(Exception e) {
-            sendMail("An error occurred while handling a reviewersModified event: " + e.getMessage());
-        }
-    }
+//    @EventListener
+//    public void merged(PullRequestMergedEvent event) {
+//        //log.info("Pull Request Merged Event occurred.");
+//        try {
+//            Message message = getMessage(event, ".pullrequest.merged");
+//            sendMessage(message);
+//        } catch(Exception e) {
+//            //sendmail("An error occurred while handling a merged pull request event: " + e.getMessage());
+//        }
+//    }
+//
+//    /*
+//     * This event fires when someone opens a pull request and sends a Fedmsg message to a relevant topic
+//     * about the event.
+//     */
+//    @EventListener
+//    public void opened(PullRequestOpenedEvent event) {
+//        //log.info("Pull Request Opened Event occurred.");
+//        try {
+//            Message message = getMessage(event, ".pullrequest.opened");
+//            sendMessage(message);
+//        } catch(Exception e) {
+//            //sendmail("An error occurred while handling an opened pull request event: " + e.getMessage());
+//        }
+//    }
+//
+//    /*
+//     * This event fires if someone declines the pull request. It also sends a Fedmsg message to the relevant
+//     * topic. For some reason, this event doesn't store who did the approving, so that is not part of the
+//     * message.
+//     */
+//    @EventListener
+//    public void declined(PullRequestDeclinedEvent event) {
+//        //log.info("Pull Request Declined Event occurred.");
+//        try {
+//            Message message = getMessage(event, ".pullrequest.declined");
+//            sendMessage(message);
+//        } catch(Exception e) {
+//            //sendmail("An error occurred while handling a declined pull request event: " + e.getMessage());
+//        }
+//    }
+//
+//    /*
+//     * This event fires when the approval status of a pull request changes. It sends a Fedmsg message to
+//     * the relevant topic and adds in who is responsible for the change in status.
+//     */
+//    @EventListener
+//    public void approvalStatusChange(PullRequestApprovalEvent event) {
+//        //log.info("Pull Request Approval Event occurred.");
+//        try {
+//            Message message = getMessage(event);
+//            sendMessage(message);
+//        } catch(Exception e) {
+//            //sendmail("An error occurred while handling an approvalStatusChange event: " + e.getMessage());
+//        }
+//    }
+//
+//    /*
+//     * This event fires when reviewers for a pull request are modified and sends a Fedmsg message to
+//     * the relevant topic with a list of the newly added or recently deleted reviewer(s).
+//     */
+//    @EventListener
+//    public void reviewersModified(PullRequestRolesUpdatedEvent event) {
+//        //log.info("Pull Request ReviewersModified Event occurred.");
+//        try {
+//            Message message = getMessage(event, ".pullrequest.reviewersmodified");
+//            sendMessage(message);
+//        } catch(Exception e) {
+//            //sendmail("An error occurred while handling a reviewersModified event: " + e.getMessage());
+//        }
+//    }
 }
