@@ -124,7 +124,7 @@ public class FedmsgEventListener {
             log.error("An error occurred while finding the latest refIds for each branch in a repo: " + e.getMessage() +
                     " The error occurred while analyzing ref " + ref.getToHash() + " type: " + ref.getType());
         }
-        log.debug("Found the latest refs: " + refIds);
+        log.info("Found the latest refs: " + refIds);
         return refIds;
     }
 
@@ -133,7 +133,7 @@ public class FedmsgEventListener {
      * a specified topic and prepends an topic prefix, environment, and modname.
      */
     private void sendMessage(Message message) {
-        log.debug("Sending fedmsg message...");
+        log.info("Sending fedmsg message...");
         FedmsgMessage msg = new FedmsgMessage(
                 message.getMessage(),
                 (topicPrefix + message.getTopic()).toLowerCase(),
@@ -163,7 +163,8 @@ public class FedmsgEventListener {
             repo.getProject().getKey();
 
         } catch (Exception e) {
-            //sendmail("Error while scraping for branch change information: " + e.getMessage() + "\ntopic: " + topic);
+            log.error("Error while sending branch change message: {} fromHash: {} toHash: {} state: {} repo: {}",
+                    e.getMessage(), ref.getFromHash(), ref.getToHash(), state, repo.getName());
         }
         Message message = new Message(content, topic);
         sendMessage(message);
@@ -196,7 +197,8 @@ public class FedmsgEventListener {
                 content.put("when_timestamp", df.format(tagCommits.get(0).getAuthorTimestamp()));
             }
         } catch (Exception e) {
-            //sendmail("Error while scraping for tag change information: " + e.getMessage() + "\ntopic: " + topic);
+            log.error("Error while sending tag change message: {} fromHash: {} toHash: {} state: {} repo: {}",
+                    e.getMessage(), ref.getFromHash(), ref.getToHash(), state, repo.getName());
         }
         Message message = new Message(content, topic);
         sendMessage(message);
@@ -237,7 +239,7 @@ public class FedmsgEventListener {
             log.error("Error while finding new commits from a refChange: " + ref.getRefId() + "\nMessage: " + e.getMessage()
                     + "\nfromHash: " + ref.getFromHash() + "\ntoHash: " + ref.getToHash() + "\ntype: " + ref.getType());
         }
-        log.debug("Found the latest commits: " + newCommits);
+        log.info("Found the latest commits: " + newCommits);
         return newCommits;
     }
 
@@ -369,17 +371,17 @@ public class FedmsgEventListener {
             Repository repository = event.getRepository();
 
             for (RefChange refChange : refChanges) {
-                log.debug("checking ref change refId={} fromHash={} toHash={} type={}", refChange.getRefId(), refChange.getFromHash(),
+                log.info("checking ref change refId={} fromHash={} toHash={} type={}", refChange.getRefId(), refChange.getFromHash(),
                         refChange.getToHash(), refChange.getType());
                 HashSet<String> latestRefIds = getLatestRefs(repository, refChange);
 
                 if (refChange.getRefId().startsWith("refs/notes")) {
-                    log.debug("Skipping git notes.");
+                    log.info("Skipping git notes.");
                     continue;
                 }
 
                 if (refChange.getType() == RefChangeType.ADD && isDeleted(refChange)) {
-                    log.debug("Deleted a ref that never existed. This shouldn't ever occur.");
+                    log.info("Deleted a ref that never existed. This shouldn't ever occur.");
                     continue;
                 }
 
@@ -389,7 +391,7 @@ public class FedmsgEventListener {
                     if (!refChange.getRefId().contains("refs/tags")) {
                         // Branch creation
                         if (isCreated(refChange)) {
-                            log.debug("Branch Creation event occurred. Possible new commits on this branch.");
+                            log.info("Branch Creation event occurred. Possible new commits on this branch.");
                             //sendBranchChangeMessage("created", refChange, repository);
                             processChanges(preProcessChangeset(repository, refChange, latestRefIds), refChange);
                         }
