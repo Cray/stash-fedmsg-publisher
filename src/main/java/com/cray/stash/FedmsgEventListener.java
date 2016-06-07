@@ -1,50 +1,47 @@
 package com.cray.stash;
 
 import com.atlassian.event.api.EventListener;
-import com.atlassian.stash.commit.Changeset;
-import com.atlassian.stash.commit.CommitService;
-import com.atlassian.stash.content.*;
 import com.atlassian.stash.commit.*;
+import com.atlassian.stash.content.Change;
 import com.atlassian.stash.event.RepositoryRefsChangedEvent;
-import com.atlassian.stash.repository.RefChangeType;
-import com.atlassian.stash.event.pull.*;
+import com.atlassian.stash.event.pull.PullRequestApprovalEvent;
+import com.atlassian.stash.event.pull.PullRequestEvent;
+import com.atlassian.stash.event.pull.PullRequestRolesUpdatedEvent;
 import com.atlassian.stash.exception.AuthorisationException;
 import com.atlassian.stash.pull.PullRequest;
 import com.atlassian.stash.pull.PullRequestAction;
 import com.atlassian.stash.pull.PullRequestParticipant;
 import com.atlassian.stash.repository.*;
+import com.atlassian.stash.server.ApplicationPropertiesService;
 import com.atlassian.stash.user.Permission;
 import com.atlassian.stash.user.SecurityService;
 import com.atlassian.stash.user.StashUser;
 import com.atlassian.stash.util.NamedLink;
 import com.atlassian.stash.util.Page;
 import com.atlassian.stash.util.PageUtils;
-import com.atlassian.stash.server.ApplicationPropertiesService;
-
-// Sending fedmsg messages
 import com.atlassian.stash.util.UncheckedOperation;
 import org.fedoraproject.fedmsg.FedmsgConnection;
 import org.fedoraproject.fedmsg.FedmsgMessage;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.*;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+// Sending fedmsg messages
 
 public class FedmsgEventListener {
-    private CommitService commitService;
+    private static final Logger log = LoggerFactory.getLogger(FedmsgEventListener.class);
+    private final CommitService commitService;
     private String endpoint;
-    private SecurityService security;
-    private RefService repoData;
-    private RepositoryService repoService;
+    private final SecurityService security;
+    private final RefService repoData;
+    private final RepositoryService repoService;
     private String topicPrefix;
     private int pageLimit;
-    private static final Logger log = LoggerFactory.getLogger(FedmsgEventListener.class);
     private FedmsgConnection connect;
-    private String errorRecipient;
 
     public FedmsgEventListener(CommitService commitService, RefService repoData, RepositoryService repoService, ApplicationPropertiesService appService, SecurityService security) {
         log.info("Initializing FedmsgEventListerner plugin...");
@@ -52,17 +49,6 @@ public class FedmsgEventListener {
         this.repoData = repoData;
         this.repoService = repoService;
         this.security = security;
-
-        try {
-            errorRecipient = appService.getPluginProperty("plugin.fedmsg.mailRecipient");
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-
-        if (errorRecipient == null) {
-            errorRecipient = "ci-info@cray.com";
-            log.info("The error email recipient was not set so using ci-info as a default.");
-        }
 
         try {
             endpoint = appService.getPluginProperty("plugin.fedmsg.events.relay.endpoint");
@@ -226,6 +212,7 @@ public class FedmsgEventListener {
 
         // Page of all commits, likely containing ones we've already processed
         Page<Commit> commits = getChangeset(repo, ref);
+
         // Process commits newest to oldest
         try {
             for (Commit commit : commits.getValues()) {
@@ -255,8 +242,7 @@ public class FedmsgEventListener {
             Set<NamedLink> setLinks = security.withPermission(Permission.ADMIN, "Requesting Clone URLs").call(new UncheckedOperation<Set<NamedLink>>() {
                 @Override
                 public Set<NamedLink> perform() {
-                    Set<NamedLink> setLinks = repoService.getCloneLinks(linksRequest);
-                    return setLinks;
+                    return repoService.getCloneLinks(linksRequest);
                 }
             });
             for (NamedLink link : setLinks) {
@@ -302,6 +288,9 @@ public class FedmsgEventListener {
             content.put("when_timestamp", df.format(commit.getAuthorTimestamp()));
             content.put("branch", branch);
             content.put("files", files);
+        } catch (NullPointerException e) {
+            log.error("NullPointerException occurred while extracting information from a commit object. Commit Message: " + commit.getMessage()
+                    + " author: " + commit.getAuthor().getName() + " commit id: " + commit.getDisplayId() + "\nMessage: " + e.getMessage());
         } catch (Exception e) {
             log.error("Exception occurred while extracting information from a commit object. Commit Message: " + commit.getMessage()
                     + " author: " + commit.getAuthor().getName() + " commit id: " + commit.getDisplayId() + "\nMessage: " + e.getMessage());
@@ -387,8 +376,8 @@ public class FedmsgEventListener {
 
                 // Are we dealing with a new tag/branch or just normal commits?
                 if (isCreated(refChange) || isDeleted(refChange)) {
-                    // Are we dealing with a tag/branch refChange?
-                    if (!refChange.getRefId().contains("refs/tags")) {
+                    // Are we dealing with a tag or a branch refChange?
+                    if (refChange.getRefId().startsWith("refs/heads")) {
                         // Branch creation
                         if (isCreated(refChange)) {
                             log.info("Branch Creation event occurred. Possible new commits on this branch.");
@@ -403,7 +392,7 @@ public class FedmsgEventListener {
                         }
                     }
                     // Tag refChange
-                    else if (refChange.getRefId().contains("refs/tags")) {
+                    else if (refChange.getRefId().startsWith("refs/tags")) {
                         // Tag creation
                         if (isCreated(refChange)) {
                             //log.info("Tag Creation event occurred.");
@@ -416,6 +405,9 @@ public class FedmsgEventListener {
                             //sendTagMessage("deleted", refChange, repository, latestRefIds);
                             continue;
                         }
+                    }
+                    else {
+                        log.info("Unexpected refChange name: {}", refChange.getRefId());
                     }
                 }
                 // This is just new commits (or a merge commit), no tags or branches.
@@ -572,8 +564,7 @@ public class FedmsgEventListener {
         }
 
         String topic = originProjectKey + "." + originRepo + type;
-        Message message = new Message(content, topic);
-        return message;
+        return new Message(content, topic);
     }
 
     /*
@@ -585,7 +576,7 @@ public class FedmsgEventListener {
      * This event fires when someone hits the "merge" button on an open pull request. It sends a Fedmsg
      * message to the relevant topic about this event.
      */
-//    @EventListener
+//    @EventFactory
 //    public void merged(PullRequestMergedEvent event) {
 //        //log.info("Pull Request Merged Event occurred.");
 //        try {
@@ -616,7 +607,7 @@ public class FedmsgEventListener {
 //     * topic. For some reason, this event doesn't store who did the approving, so that is not part of the
 //     * message.
 //     */
-//    @EventListener
+//    @EventFactory
 //    public void declined(PullRequestDeclinedEvent event) {
 //        //log.info("Pull Request Declined Event occurred.");
 //        try {
@@ -631,7 +622,7 @@ public class FedmsgEventListener {
 //     * This event fires when the approval status of a pull request changes. It sends a Fedmsg message to
 //     * the relevant topic and adds in who is responsible for the change in status.
 //     */
-//    @EventListener
+//    @EventFactory
 //    public void approvalStatusChange(PullRequestApprovalEvent event) {
 //        //log.info("Pull Request Approval Event occurred.");
 //        try {
@@ -646,7 +637,7 @@ public class FedmsgEventListener {
 //     * This event fires when reviewers for a pull request are modified and sends a Fedmsg message to
 //     * the relevant topic with a list of the newly added or recently deleted reviewer(s).
 //     */
-//    @EventListener
+//    @EventFactory
 //    public void reviewersModified(PullRequestRolesUpdatedEvent event) {
 //        //log.info("Pull Request ReviewersModified Event occurred.");
 //        try {
