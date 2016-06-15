@@ -19,7 +19,8 @@ public class SEPRefChangeEventImpl implements SEPRefChangeEvent {
     private SEPCommits sepCommits;
     private FedmsgConnection connection;
     private String endpoint;
-
+    private static final String REF_BRANCH = "refs/heads";
+    private static final String REF_TAG = "refs/tags";
     public SEPRefChangeEventImpl(SEPCommits sepCommits, ApplicationPropertiesService appService) {
         this.sepCommits = sepCommits;
 
@@ -58,21 +59,21 @@ public class SEPRefChangeEventImpl implements SEPRefChangeEvent {
                 continue;
             }
 
-            if(isCreated(refChange) && refChange.getRefId().startsWith("refs/heads")){
+            if(isCreated(refChange) && refChange.getRefId().startsWith(REF_BRANCH)){
                 LOGGER.info("Branch Creation event occurred. Possible new commits on this branch.");
                 sendCommits(sepCommits.findCommitInfo(refChange, event.getRepository()));
-            } else if(isCreated(refChange) && refChange.getRefId().startsWith("refs/tags")){
+            } else if(isCreated(refChange) && refChange.getRefId().startsWith(REF_TAG)){
                 continue; //not supported yet
-            } else if(isDeleted(refChange) && refChange.getRefId().startsWith("refs/heads")){
+            } else if(isDeleted(refChange) && refChange.getRefId().startsWith(REF_BRANCH)){
                 continue; //not supported yet
-            } else if(isDeleted(refChange) && refChange.getRefId().startsWith("refs/tags")) {
+            } else if(isDeleted(refChange) && refChange.getRefId().startsWith(REF_TAG)) {
                 continue; //not supported yet
-            } else if(!refChange.getRefId().startsWith("refs/heads") && !refChange.getRefId().startsWith("refs/tags")) {
+            } else if(!refChange.getRefId().startsWith(REF_BRANCH) && !refChange.getRefId().startsWith(REF_TAG)) {
                 //bizarre weird branch name
                 LOGGER.info("Unexpected refChange name: {}", refChange.getRefId());
             } else {
                 //sanity check?
-                if(refChange.getRefId().startsWith("refs/heads")){
+                if(refChange.getRefId().startsWith(REF_BRANCH)){
                     sendCommits(sepCommits.findCommitInfo(refChange, event.getRepository()));
                 } else {
                     LOGGER.info("Found new commits that were using an unexpected ref name: {}\nDid not process them.",refChange.getRefId());
