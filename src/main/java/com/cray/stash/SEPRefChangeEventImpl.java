@@ -63,11 +63,8 @@ public class SEPRefChangeEventImpl implements SEPRefChangeEvent {
                 LOGGER.info("Branch Creation event occurred. Possible new commits on this branch.");
                 sendCommits(sepCommits.findCommitInfo(refChange, event.getRepository()));
             } else if(isCreated(refChange) && refChange.getRefId().startsWith(REF_TAG)){
-                continue; //not supported yet
             } else if(isDeleted(refChange) && refChange.getRefId().startsWith(REF_BRANCH)){
-                continue; //not supported yet
             } else if(isDeleted(refChange) && refChange.getRefId().startsWith(REF_TAG)) {
-                continue; //not supported yet
             } else if(!refChange.getRefId().startsWith(REF_BRANCH) && !refChange.getRefId().startsWith(REF_TAG)) {
                 //bizarre weird branch name
                 LOGGER.info("Unexpected refChange name: {}", refChange.getRefId());
