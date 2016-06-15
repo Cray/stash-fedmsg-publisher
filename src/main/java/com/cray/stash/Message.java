@@ -38,9 +38,9 @@ public class Message {
         try {
             connection.send(msg);
         } catch (IOException e) {
-            LOGGER.error("IOException occurred when sending fedmsg message: " + e.getMessage());
+            LOGGER.error("IOException occurred when sending fedmsg message: {}\nError: {}", e.getMessage(), e);
         } catch (Exception e) {
-            LOGGER.error("Exception occurred when sending fedmsg message: " + e.getMessage());
+            LOGGER.error("Exception occurred when sending fedmsg message: {}\nError: {}", e.getMessage(), e);
         }
     }
 }
