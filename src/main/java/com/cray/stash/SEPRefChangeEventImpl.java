@@ -8,6 +8,7 @@ import org.fedoraproject.fedmsg.FedmsgConnection;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
+import java.util.List;
 
 
 /**
@@ -101,7 +102,7 @@ public class SEPRefChangeEventImpl implements SEPRefChangeEvent {
     }
 
     @Override
-    public void sendCommits(ArrayList<Message> commitMessages) {
+    public void sendCommits(List<Message> commitMessages) {
         try {
             for(Message message: commitMessages){
                 message.sendMessage(connection);

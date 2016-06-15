@@ -1,14 +1,12 @@
 package com.cray.stash;
 
 import com.atlassian.stash.event.RepositoryRefsChangedEvent;
-import org.fedoraproject.fedmsg.FedmsgConnection;
-
-import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Created by swalter on 6/9/2016.
  */
 public interface SEPRefChangeEvent {
     void processEvent(RepositoryRefsChangedEvent event);
-    void sendCommits(ArrayList<Message> commitMessages);
+    void sendCommits(List<Message> commitMessages);
 }
