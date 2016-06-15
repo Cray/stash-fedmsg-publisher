@@ -12,7 +12,7 @@ import java.util.concurrent.ExecutorService;
  */
 public class EventFactory {
 
-    private final static Logger log = LoggerFactory.getLogger(EventFactory.class);
+    private static final Logger log = LoggerFactory.getLogger(EventFactory.class);
     private SEPRefChangeEvent sepRefChangeEvent;
     private ExecutorService executorService;
 
