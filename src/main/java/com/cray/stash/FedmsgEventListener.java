@@ -121,7 +121,7 @@ public class FedmsgEventListener {
     private void sendMessage(Message message) {
         log.info("Sending fedmsg message...");
         FedmsgMessage msg = new FedmsgMessage(
-                message.getMessage(),
+                (HashMap)message.getMessage(),
                 (topicPrefix + message.getTopic()).toLowerCase(),
                 (new java.util.Date()).getTime() / 1000,
                 1);
