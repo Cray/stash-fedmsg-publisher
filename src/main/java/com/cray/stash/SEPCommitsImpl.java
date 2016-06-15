@@ -24,7 +24,6 @@ public class SEPCommitsImpl implements SEPCommits {
     private SecurityService security;
     private RepositoryService repoService;
     private int pageLimit;
-    private ApplicationPropertiesService appService;
     private static final Logger LOGGER = LoggerFactory.getLogger(SEPCommitsImpl.class);
     private String topicPrefix;
 
@@ -33,7 +32,6 @@ public class SEPCommitsImpl implements SEPCommits {
         this.commitService = commitService;
         this.security = security;
         this.repoService = repoService;
-        this.appService = appService;
 
         try {
             pageLimit = Integer.parseInt(appService.getPluginProperty("plugin.fedmsg.pageLimit"));

@@ -7,7 +7,6 @@ import com.atlassian.stash.server.ApplicationPropertiesService;
 import org.fedoraproject.fedmsg.FedmsgConnection;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import java.util.ArrayList;
 import java.util.List;
 
 
@@ -19,12 +18,10 @@ public class SEPRefChangeEventImpl implements SEPRefChangeEvent {
     private static final Logger LOGGER = LoggerFactory.getLogger(SEPRefChangeEventImpl.class);
     private SEPCommits sepCommits;
     private FedmsgConnection connection;
-    private ApplicationPropertiesService appService;
     private String endpoint;
 
     public SEPRefChangeEventImpl(SEPCommits sepCommits, ApplicationPropertiesService appService) {
         this.sepCommits = sepCommits;
-        this.appService = appService;
 
         try {
             endpoint = appService.getPluginProperty("plugin.fedmsg.events.relay.endpoint");
