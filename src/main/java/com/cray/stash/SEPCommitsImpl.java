@@ -46,6 +46,11 @@ public class SEPCommitsImpl implements SEPCommits {
             pageLimit = 250;
             log.info("The page limit was not set so it's set to 250 by default.");
         }
+
+        if (topicPrefix == null) {
+            topicPrefix = "com.cray.dev.stash.";
+            log.info("The topic prefix was empty so it's set to the dev environment by default.");
+        }
     }
 
     @Override
@@ -53,7 +58,7 @@ public class SEPCommitsImpl implements SEPCommits {
         ArrayList<Message> toSend = new ArrayList<Message>();
         Page<Commit> commits = getChangeset(repo, ref);
         for (Commit commit : commits.getValues()) {
-            String topic = topicPrefix + commit.getRepository().getProject().getKey() + "." + commit.getRepository().getName() + ".commit";
+            String topic = topicPrefix + repo.getProject().getKey() + "." + repo.getName() + ".commit";
             Message message = new Message(getInfo(commit), topic);
             toSend.add(message);
         }
