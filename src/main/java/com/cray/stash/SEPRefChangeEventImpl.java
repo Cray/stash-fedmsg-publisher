@@ -51,15 +51,11 @@ public class SEPRefChangeEventImpl implements SEPRefChangeEvent {
 
             if (refChange.getRefId().startsWith("refs/notes")) {
                 LOGGER.info("Skipping git notes.");
-                continue;
             }
-
-            if (refChange.getType() == RefChangeType.ADD && isDeleted(refChange)) {
+            else if (refChange.getType() == RefChangeType.ADD && isDeleted(refChange)) {
                 LOGGER.info("Deleted a ref that never existed. This shouldn't ever occur.");
-                continue;
             }
-
-            if(isCreated(refChange) && refChange.getRefId().startsWith(REF_BRANCH)){
+            else if(isCreated(refChange) && refChange.getRefId().startsWith(REF_BRANCH)){
                 LOGGER.info("Branch Creation event occurred. Possible new commits on this branch.");
                 sendCommits(sepCommits.findCommitInfo(refChange, event.getRepository()));
             } else if(isCreated(refChange) && refChange.getRefId().startsWith(REF_TAG)){
