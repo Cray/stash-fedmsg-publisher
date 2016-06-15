@@ -7,19 +7,20 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.Map;
 
 public class Message {
 
     private HashMap<String, Object> content;
     private String topic;
-    private final static Logger log = LoggerFactory.getLogger(Message.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(Message.class);
 
-    public Message(HashMap<String, Object> content, String topic) {
+    public Message(Map<String, Object> content, String topic) {
         this.topic = topic;
-        this.content = content;
+        this.content = (HashMap)content;
     }
 
-    public HashMap<String, Object> getMessage() {return content;}
+    public Map<String, Object> getMessage() {return content;}
 
     public String getTopic() {return topic;}
 
@@ -28,7 +29,7 @@ public class Message {
      * a specified topic and prepends an topic prefix, environment, and modname.
      */
     public void sendMessage(FedmsgConnection connection) {
-        log.info("Sending fedmsg message...");
+        LOGGER.info("Sending fedmsg message...");
         FedmsgMessage msg = new FedmsgMessage(
                 content,
                 topic.toLowerCase(),
@@ -37,9 +38,9 @@ public class Message {
         try {
             connection.send(msg);
         } catch (IOException e) {
-            log.error("IOException occurred when sending fedmsg message: " + e.getMessage());
+            LOGGER.error("IOException occurred when sending fedmsg message: " + e.getMessage());
         } catch (Exception e) {
-            log.error("Exception occurred when sending fedmsg message: " + e.getMessage());
+            LOGGER.error("Exception occurred when sending fedmsg message: " + e.getMessage());
         }
     }
 }
