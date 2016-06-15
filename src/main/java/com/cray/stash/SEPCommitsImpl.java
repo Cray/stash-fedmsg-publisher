@@ -39,7 +39,7 @@ public class SEPCommitsImpl implements SEPCommits {
             pageLimit = Integer.parseInt(appService.getPluginProperty("plugin.fedmsg.pageLimit"));
             topicPrefix = appService.getPluginProperty("plugin.fedmsg.events.topic.prefix");
         } catch (Exception e) {
-            LOGGER.error("Failed to retrieve page limit property, error message was: " + e.getMessage());
+            LOGGER.error("Failed to retrieve page limit property, error was: " + e);
         }
 
         if (pageLimit == 0) {
@@ -54,7 +54,7 @@ public class SEPCommitsImpl implements SEPCommits {
     }
 
     @Override
-    public ArrayList<Message> findCommitInfo(RefChange ref, Repository repo) {
+    public List<Message> findCommitInfo(RefChange ref, Repository repo) {
         ArrayList<Message> toSend = new ArrayList<Message>();
         Page<Commit> commits = getChangeset(repo, ref);
         for (Commit commit : commits.getValues()) {
@@ -91,10 +91,10 @@ public class SEPCommitsImpl implements SEPCommits {
             content.put("files", getFiles(commit));
         } catch (NullPointerException e) {
             LOGGER.error("NullPointerException occurred while extracting information from a commit object. Commit Message: " + commit.getMessage()
-                    + " author: " + commit.getAuthor().getName() + " commit id: " + commit.getDisplayId() + "\nMessage: " + e.getMessage());
+                    + " author: " + commit.getAuthor().getName() + " commit id: " + commit.getDisplayId() + "\nError: " + e);
         } catch (Exception e) {
             LOGGER.error("Exception occurred while extracting information from a commit object. Commit Message: " + commit.getMessage()
-                    + " author: " + commit.getAuthor().getName() + " commit id: " + commit.getDisplayId() + "\nMessage: " + e.getMessage());
+                    + " author: " + commit.getAuthor().getName() + " commit id: " + commit.getDisplayId() + "\nError: " + e);
         }
         return content;
     }
@@ -125,7 +125,7 @@ public class SEPCommitsImpl implements SEPCommits {
                 }
             }
         } catch (Exception e) {
-            LOGGER.error("An error occurred while finding all the branches in a repo: " + e.getMessage());
+            LOGGER.error("An error occurred while finding all the branches in a repo\n" + e);
         }
 
         if(!ref.getFromHash().contains("0000000000000000000000000000000000000000")){
@@ -175,11 +175,11 @@ public class SEPCommitsImpl implements SEPCommits {
                 }
             }
         } catch (AuthorisationException e) {
-            LOGGER.error("AuthorisationException occurred while finding clone urls: " + e.getMessage());
+            LOGGER.error("AuthorisationException occurred while finding clone urls\n" + e);
         } catch (IllegalStateException e) {
-            LOGGER.error("IllegalStateException occurred while finding clone urls: " + e.getMessage());
+            LOGGER.error("IllegalStateException occurred while finding clone urls:\n" + e);
         } catch (Exception e) {
-            LOGGER.error("Exception occurred while finding clone urls: " + e.getMessage());
+            LOGGER.error("Exception occurred while finding clone urls\n" + e);
         }
         return links;
     }
