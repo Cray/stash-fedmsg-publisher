@@ -6,9 +6,9 @@ import org.fedoraproject.fedmsg.FedmsgConnection;
 import java.util.ArrayList;
 
 /**
- * Created by swalter on 6/2/2016.
+ * Created by swalter on 6/9/2016.
  */
 public interface SEPRefChangeEvent {
-    public void processEvent(RepositoryRefsChangedEvent event, FedmsgConnection connection);
-    public void sendCommits(ArrayList<Message> commitMessages, FedmsgConnection connection);
+    void processEvent(RepositoryRefsChangedEvent event);
+    void sendCommits(ArrayList<Message> commitMessages);
 }
