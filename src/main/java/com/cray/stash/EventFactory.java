@@ -12,7 +12,7 @@ import java.util.concurrent.ExecutorService;
  */
 public class EventFactory {
 
-    private static final Logger log = LoggerFactory.getLogger(EventFactory.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(EventFactory.class);
     private SEPRefChangeEvent sepRefChangeEvent;
     private ExecutorService executorService;
 
@@ -23,7 +23,7 @@ public class EventFactory {
 
     @EventListener
     public void onRefChange(RepositoryRefsChangedEvent event) {
-        log.info("RefChange event occurred.");
+        LOGGER.info("RefChange event occurred.");
         executorService.submit(new Runnable() {
             @Override
             public void run() {

@@ -25,7 +25,7 @@ public class SEPCommitsImpl implements SEPCommits {
     private RepositoryService repoService;
     private int pageLimit;
     private ApplicationPropertiesService appService;
-    private static final Logger log = LoggerFactory.getLogger(SEPCommitsImpl.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(SEPCommitsImpl.class);
     private String topicPrefix;
 
     public SEPCommitsImpl(RefService repoData, CommitService commitService, SecurityService security, RepositoryService repoService, ApplicationPropertiesService appService) {
@@ -39,17 +39,17 @@ public class SEPCommitsImpl implements SEPCommits {
             pageLimit = Integer.parseInt(appService.getPluginProperty("plugin.fedmsg.pageLimit"));
             topicPrefix = appService.getPluginProperty("plugin.fedmsg.events.topic.prefix");
         } catch (Exception e) {
-            log.error("Failed to retrieve page limit property, error message was: " + e.getMessage());
+            LOGGER.error("Failed to retrieve page limit property, error message was: " + e.getMessage());
         }
 
         if (pageLimit == 0) {
             pageLimit = 250;
-            log.info("The page limit was not set so it's set to 250 by default.");
+            LOGGER.info("The page limit was not set so it's set to 250 by default.");
         }
 
         if (topicPrefix == null) {
             topicPrefix = "com.cray.dev.stash.";
-            log.info("The topic prefix was empty so it's set to the dev environment by default.");
+            LOGGER.info("The topic prefix was empty so it's set to the dev environment by default.");
         }
     }
 
@@ -90,10 +90,10 @@ public class SEPCommitsImpl implements SEPCommits {
             content.put("branch", commit.getDisplayId());
             content.put("files", getFiles(commit));
         } catch (NullPointerException e) {
-            log.error("NullPointerException occurred while extracting information from a commit object. Commit Message: " + commit.getMessage()
+            LOGGER.error("NullPointerException occurred while extracting information from a commit object. Commit Message: " + commit.getMessage()
                     + " author: " + commit.getAuthor().getName() + " commit id: " + commit.getDisplayId() + "\nMessage: " + e.getMessage());
         } catch (Exception e) {
-            log.error("Exception occurred while extracting information from a commit object. Commit Message: " + commit.getMessage()
+            LOGGER.error("Exception occurred while extracting information from a commit object. Commit Message: " + commit.getMessage()
                     + " author: " + commit.getAuthor().getName() + " commit id: " + commit.getDisplayId() + "\nMessage: " + e.getMessage());
         }
         return content;
@@ -125,7 +125,7 @@ public class SEPCommitsImpl implements SEPCommits {
                 }
             }
         } catch (Exception e) {
-            log.error("An error occurred while finding all the branches in a repo: " + e.getMessage());
+            LOGGER.error("An error occurred while finding all the branches in a repo: " + e.getMessage());
         }
 
         if(!ref.getFromHash().contains("0000000000000000000000000000000000000000")){
@@ -175,11 +175,11 @@ public class SEPCommitsImpl implements SEPCommits {
                 }
             }
         } catch (AuthorisationException e) {
-            log.error("AuthorisationException occurred while finding clone urls: " + e.getMessage());
+            LOGGER.error("AuthorisationException occurred while finding clone urls: " + e.getMessage());
         } catch (IllegalStateException e) {
-            log.error("IllegalStateException occurred while finding clone urls: " + e.getMessage());
+            LOGGER.error("IllegalStateException occurred while finding clone urls: " + e.getMessage());
         } catch (Exception e) {
-            log.error("Exception occurred while finding clone urls: " + e.getMessage());
+            LOGGER.error("Exception occurred while finding clone urls: " + e.getMessage());
         }
         return links;
     }

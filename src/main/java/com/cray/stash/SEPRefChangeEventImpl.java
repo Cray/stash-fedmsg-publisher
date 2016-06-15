@@ -16,7 +16,7 @@ import java.util.List;
  */
 public class SEPRefChangeEventImpl implements SEPRefChangeEvent {
 
-    private static final Logger log = LoggerFactory.getLogger(SEPRefChangeEventImpl.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(SEPRefChangeEventImpl.class);
     private SEPCommits sepCommits;
     private FedmsgConnection connection;
     private ApplicationPropertiesService appService;
@@ -29,18 +29,18 @@ public class SEPRefChangeEventImpl implements SEPRefChangeEvent {
         try {
             endpoint = appService.getPluginProperty("plugin.fedmsg.events.relay.endpoint");
         } catch (Exception e) {
-            log.error("Failed to retrieve properties " + e.getMessage());
+            LOGGER.error("Failed to retrieve properties " + e.getMessage());
         }
 
         if (endpoint == null) {
             endpoint = "tcp://bit01.us.cray.com:9941";
-            log.info("The endpoint value was not set. Using the default bit01 relay.");
+            LOGGER.info("The endpoint value was not set. Using the default bit01 relay.");
         }
 
         try {
             connection = new FedmsgConnection(endpoint, 2000).connect();
         } catch (Exception e) {
-            log.error("Failed to connect to relay: " + e.getMessage());
+            LOGGER.error("Failed to connect to relay: " + e.getMessage());
         }
     }
 
@@ -48,46 +48,46 @@ public class SEPRefChangeEventImpl implements SEPRefChangeEvent {
     public void processEvent(RepositoryRefsChangedEvent event) {
 
         for (RefChange refChange : event.getRefChanges()) {
-            log.info("checking ref change refId={} fromHash={} toHash={} type={}", refChange.getRefId(), refChange.getFromHash(),
+            LOGGER.info("checking ref change refId={} fromHash={} toHash={} type={}", refChange.getRefId(), refChange.getFromHash(),
                     refChange.getToHash(), refChange.getType());
 
             if (refChange.getRefId().startsWith("refs/notes")) {
-                log.info("Skipping git notes.");
+                LOGGER.info("Skipping git notes.");
                 continue;
             }
 
             if (refChange.getType() == RefChangeType.ADD && isDeleted(refChange)) {
-                log.info("Deleted a ref that never existed. This shouldn't ever occur.");
+                LOGGER.info("Deleted a ref that never existed. This shouldn't ever occur.");
                 continue;
             }
 
             if (isCreated(refChange) || isDeleted(refChange)) {
                 if (refChange.getRefId().startsWith("refs/heads")) {
                     if (isCreated(refChange)) {
-                        log.info("Branch Creation event occurred. Possible new commits on this branch.");
+                        LOGGER.info("Branch Creation event occurred. Possible new commits on this branch.");
                         //sendBranchChangeMessage("created", refChange, repository);
                         sendCommits(sepCommits.findCommitInfo(refChange, event.getRepository()));
                     }
                     else if (isDeleted(refChange)) {
-                        //log.info("Branch Deletion event occurred.");
+                        //LOGGER.info("Branch Deletion event occurred.");
                         //sendBranchChangeMessage("deleted", refChange, repository);
                         continue;
                     }
                 }
                 else if (refChange.getRefId().startsWith("refs/tags")) {
                     if (isCreated(refChange)) {
-                        //log.info("Tag Creation event occurred.");
+                        //LOGGER.info("Tag Creation event occurred.");
                         //sendTagMessage("created", refChange, repository, latestRefIds);
                         continue;
                     }
                     else if (isDeleted(refChange)) {
-                        //log.info("Tag deletion event occurred.");
+                        //LOGGER.info("Tag deletion event occurred.");
                         //sendTagMessage("deleted", refChange, repository, latestRefIds);
                         continue;
                     }
                 }
                 else {
-                    log.info("Unexpected refChange name: {}", refChange.getRefId());
+                    LOGGER.info("Unexpected refChange name: {}", refChange.getRefId());
                 }
             }
             else {
@@ -95,7 +95,7 @@ public class SEPRefChangeEventImpl implements SEPRefChangeEvent {
                 if(refChange.getRefId().startsWith("refs/heads")){
                     sendCommits(sepCommits.findCommitInfo(refChange, event.getRepository()));
                 } else {
-                    log.info("Found new commits that were using an unexpected ref name: {}\nDid not process them.",refChange.getRefId());
+                    LOGGER.info("Found new commits that were using an unexpected ref name: {}\nDid not process them.",refChange.getRefId());
                 }
             }
         }
@@ -108,7 +108,7 @@ public class SEPRefChangeEventImpl implements SEPRefChangeEvent {
                 message.sendMessage(connection);
             }
         } catch (Exception e) {
-            log.error("Exception was caught while sending commit info to fedmsg: " + e.getMessage());
+            LOGGER.error("Exception was caught while sending commit info to fedmsg: " + e.getMessage());
         }
     }
 
