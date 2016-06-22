@@ -53,28 +53,36 @@ public class SEPRefChangeEventImpl implements SEPRefChangeEvent {
 
             if (refChange.getRefId().startsWith("refs/notes")) {
                 LOGGER.info("Skipping git notes.");
-            }
-            else if (refChange.getType() == RefChangeType.ADD && isDeleted(refChange)) {
+            } else if (refChange.getType() == RefChangeType.ADD && isDeleted(refChange)) {
                 LOGGER.info("Deleted a ref that never existed. This shouldn't ever occur.");
-            }
-            else if(isCreated(refChange) && refChange.getRefId().startsWith(REF_BRANCH)){
-                LOGGER.info("Branch Creation event occurred. Possible new commits on this branch.");
-                sendCommits(sepCommits.findCommitInfo(refChange, event.getRepository()));
-            } else if(isCreated(refChange) && refChange.getRefId().startsWith(REF_TAG)){
-            } else if(isDeleted(refChange) && refChange.getRefId().startsWith(REF_BRANCH)){
-            } else if(isDeleted(refChange) && refChange.getRefId().startsWith(REF_TAG)) {
+            } else if(refChange.getRefId().startsWith(REF_BRANCH)){
+                branchCreation(refChange, event.getRepository());
+            } else if(refChange.getRefId().startsWith(REF_TAG)) {
+                //tagCreation(refChange, event.getRepository());
             } else if(!refChange.getRefId().startsWith(REF_BRANCH) && !refChange.getRefId().startsWith(REF_TAG)) {
-                //bizarre weird branch name
-                LOGGER.info("Unexpected refChange name: {}", refChange.getRefId());
+                //bizarre weird ref name
+                LOGGER.info("Unexpected refChange name: {}. Did not process.", refChange.getRefId());
             } else {
-                //sanity check?
-                if(refChange.getRefId().startsWith(REF_BRANCH)){
-                    sendCommits(sepCommits.findCommitInfo(refChange, event.getRepository()));
-                } else {
-                    LOGGER.info("Found new commits that were using an unexpected ref name: {}\nDid not process them.",refChange.getRefId());
-                }
+                sendCommits(sepCommits.findCommitInfo(refChange, event.getRepository()));
             }
         }
+    }
+
+    public void branchCreation(RefChange refChange, Repository repo){
+        if(isCreated(refChange)){
+            LOGGER.info("Branch Creation event occurred. Possible new commits on this branch.");
+            sendCommits(sepCommits.findCommitInfo(refChange, repo));
+        } else if(isDeleted(refChange)){
+            //not supported yet
+        } else{
+            LOGGER.info("Encountered a branch related refChange event that wasn't accounted for: " +
+                        "refId={} fromHash={} toHash={} type={}", refChange.getRefId(), refChange.getFromHash(),
+                         refChange.getToHash(), refChange.getType());
+        }
+    }
+
+    public void tagCreation(RefChange ref, Repository repo){
+        //stub
     }
 
     @Override
