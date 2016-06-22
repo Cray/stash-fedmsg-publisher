@@ -1,8 +1,10 @@
 package com.cray.stash;
 
 import com.atlassian.stash.event.RepositoryRefsChangedEvent;
+import com.atlassian.stash.nav.NavBuilder;
 import com.atlassian.stash.repository.RefChange;
 import com.atlassian.stash.repository.RefChangeType;
+import com.atlassian.stash.repository.Repository;
 import com.atlassian.stash.server.ApplicationPropertiesService;
 import org.fedoraproject.fedmsg.FedmsgConnection;
 import org.slf4j.Logger;

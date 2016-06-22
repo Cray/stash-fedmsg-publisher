@@ -26,6 +26,7 @@ public class SEPCommitsImpl implements SEPCommits {
     private int pageLimit;
     private static final Logger LOGGER = LoggerFactory.getLogger(SEPCommitsImpl.class);
     private String topicPrefix;
+    private static final int BRANCHNAME_OFFSET = 11;
 
     public SEPCommitsImpl(RefService repoData, CommitService commitService, SecurityService security, RepositoryService repoService, ApplicationPropertiesService appService) {
         this.repoData = repoData;
@@ -57,7 +58,7 @@ public class SEPCommitsImpl implements SEPCommits {
         Page<Commit> commits = getChangeset(repo, ref);
         for (Commit commit : commits.getValues()) {
             String topic = topicPrefix + repo.getProject().getKey() + "." + repo.getName() + ".commit";
-            Message message = new Message(getInfo(commit), topic);
+            Message message = new Message(getInfo(commit, ref), topic);
             toSend.add(message);
         }
         return toSend;
@@ -67,7 +68,7 @@ public class SEPCommitsImpl implements SEPCommits {
     * This method takes an individual commit object, and extracts the information from it that we want to send to
     * Fedmsg. This method is for use with the pushEvent method, so strictly refChanges.
     */
-    private HashMap<String, Object> getInfo(Commit commit) {
+    private HashMap<String, Object> getInfo(Commit commit, RefChange ref) {
         TimeZone tz = TimeZone.getTimeZone("UTC");
         DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
         df.setTimeZone(tz);
@@ -85,7 +86,7 @@ public class SEPCommitsImpl implements SEPCommits {
             content.put("project", commit.getRepository().getProject().getName());
             content.put("revision", commit.getId());
             content.put("when_timestamp", df.format(commit.getAuthorTimestamp()));
-            content.put("branch", commit.getDisplayId());
+            content.put("branch", ref.getRefId().substring(BRANCHNAME_OFFSET));
             content.put("files", getFiles(commit));
         } catch (NullPointerException e) {
             LOGGER.error("NullPointerException occurred while extracting information from a commit object. Commit Message: " + commit.getMessage()
