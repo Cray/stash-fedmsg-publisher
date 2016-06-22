@@ -1,7 +1,6 @@
 package com.cray.stash;
 
 import com.atlassian.stash.event.RepositoryRefsChangedEvent;
-import com.atlassian.stash.nav.NavBuilder;
 import com.atlassian.stash.repository.RefChange;
 import com.atlassian.stash.repository.RefChangeType;
 import com.atlassian.stash.repository.Repository;
