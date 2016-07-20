@@ -17,7 +17,7 @@ import com.atlassian.sal.api.ApplicationProperties;
  */
 public class EventLoggerFactory {
 
-    private static final String ROOT = "com.palantir.stash.signupmanager";
+    private static final String ROOT = "com.cray.stash.signupmanager";
     private static final Logger stashRootLogger = LoggerFactory.getLogger("ROOT");
 
     private LoggerContext context;
