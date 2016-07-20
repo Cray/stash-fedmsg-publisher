@@ -35,16 +35,16 @@ public class SEPRefChangeEventImpl implements SEPRefChangeEvent {
             endpoint = "tcp://bit01.us.cray.com:9941";
             LOGGER.info("The endpoint value was not set. Using the default bit01 relay.");
         }
-
-        try {
-            connection = new FedmsgConnection(endpoint, 2000).connect();
-        } catch (Exception e) {
-            LOGGER.error("Failed to connect to relay\n" + e);
-        }
     }
 
     @Override
     public void processEvent(RepositoryRefsChangedEvent event) {
+        try {
+            LOGGER.info("Establishing  connection to relay.");
+            connection = new FedmsgConnection(endpoint, 2000).connect();
+        } catch (Exception e) {
+            LOGGER.error("Failed to connect to relay\n" + e);
+        }
 
         for (RefChange refChange : event.getRefChanges()) {
             LOGGER.info("checking ref change refId={} fromHash={} toHash={} type={}", refChange.getRefId(), refChange.getFromHash(),
@@ -54,7 +54,7 @@ public class SEPRefChangeEventImpl implements SEPRefChangeEvent {
                 LOGGER.info("Skipping git notes.");
             } else if (refChange.getType() == RefChangeType.ADD && isDeleted(refChange)) {
                 LOGGER.info("Deleted a ref that never existed. This shouldn't ever occur.");
-            } else if(refChange.getRefId().startsWith(REF_BRANCH)){
+            } else if(refChange.getRefId().startsWith(REF_BRANCH) && (isDeleted(refChange) || isCreated(refChange))){
                 branchCreation(refChange, event.getRepository());
             } else if(refChange.getRefId().startsWith(REF_TAG)) {
                 //tagCreation(refChange, event.getRepository());
@@ -92,6 +92,14 @@ public class SEPRefChangeEventImpl implements SEPRefChangeEvent {
             }
         } catch (Exception e) {
             LOGGER.error("Exception was caught while sending commit info to fedmsg\n" + e);
+        }
+
+        LOGGER.info("Disconnecting from relay.");
+        try {
+            connection.disconnect();
+        } catch (Exception e)
+        {
+            LOGGER.error("Error while disconnecting from the fedmsg relay.");
         }
     }
 
