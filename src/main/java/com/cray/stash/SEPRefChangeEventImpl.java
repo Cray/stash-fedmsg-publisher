@@ -9,6 +9,7 @@ import org.fedoraproject.fedmsg.FedmsgConnection;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.util.List;
+import java.util.ListIterator;
 
 
 /**
@@ -39,12 +40,6 @@ public class SEPRefChangeEventImpl implements SEPRefChangeEvent {
 
     @Override
     public void processEvent(RepositoryRefsChangedEvent event) {
-        try {
-            LOGGER.info("Establishing  connection to relay.");
-            connection = new FedmsgConnection(endpoint, 2000).connect();
-        } catch (Exception e) {
-            LOGGER.error("Failed to connect to relay\n" + e);
-        }
 
         for (RefChange refChange : event.getRefChanges()) {
             LOGGER.info("checking ref change refId={} fromHash={} toHash={} type={}", refChange.getRefId(), refChange.getFromHash(),
@@ -64,6 +59,22 @@ public class SEPRefChangeEventImpl implements SEPRefChangeEvent {
             } else {
                 sendCommits(sepCommits.findCommitInfo(refChange, event.getRepository()));
             }
+        }
+    }
+
+    public void connectRelayAndProcess(RepositoryRefsChangedEvent event){
+        try {
+            LOGGER.info("Establishing  connection to relay.");
+            connection = new FedmsgConnection(endpoint, 2000).connect();
+        } catch (Exception e) {
+            LOGGER.error("Failed to connect to relay\n" + e);
+        }
+        processEvent(event);
+        try {
+            LOGGER.info("Disconnecting from relay.");
+            connection.disconnect();
+        } catch (Exception e) {
+            LOGGER.error("Error while disconnecting from the fedmsg relay.");
         }
     }
 
@@ -87,19 +98,13 @@ public class SEPRefChangeEventImpl implements SEPRefChangeEvent {
     @Override
     public void sendCommits(List<Message> commitMessages) {
         try {
-            for(Message message: commitMessages){
-                message.sendMessage(connection);
+            ListIterator<Message> li = commitMessages.listIterator(commitMessages.size());
+
+            while(li.hasPrevious()){
+                li.previous().sendMessage(connection);
             }
         } catch (Exception e) {
             LOGGER.error("Exception was caught while sending commit info to fedmsg\n" + e);
-        }
-
-        LOGGER.info("Disconnecting from relay.");
-        try {
-            connection.disconnect();
-        } catch (Exception e)
-        {
-            LOGGER.error("Error while disconnecting from the fedmsg relay.");
         }
     }
 

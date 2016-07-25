@@ -9,4 +9,5 @@ import java.util.List;
 public interface SEPRefChangeEvent {
     void processEvent(RepositoryRefsChangedEvent event);
     void sendCommits(List<Message> commitMessages);
+    void connectRelayAndProcess(RepositoryRefsChangedEvent event);
 }

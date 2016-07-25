@@ -28,7 +28,7 @@ public class EventFactory {
         executorService.submit(new Runnable() {
             @Override
             public void run() {
-                sepRefChangeEvent.processEvent(event);
+                sepRefChangeEvent.connectRelayAndProcess(event);
             }
         });
     }
