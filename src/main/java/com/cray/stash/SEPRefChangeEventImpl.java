@@ -67,14 +67,20 @@ public class SEPRefChangeEventImpl implements SEPRefChangeEvent {
             LOGGER.info("Establishing  connection to relay.");
             connection = new FedmsgConnection(endpoint, 2000).connect();
         } catch (Exception e) {
-            LOGGER.error("Failed to connect to relay\n" + e);
+            LOGGER.error("Failed to connect to relay:\n" + e);
         }
-        processEvent(event);
+
+        try {
+            processEvent(event);
+        } catch (Exception e) {
+            LOGGER.error("Failed to process event:\n" + e);
+        }
+
         try {
             LOGGER.info("Disconnecting from relay.");
             connection.disconnect();
         } catch (Exception e) {
-            LOGGER.error("Error while disconnecting from the fedmsg relay.");
+            LOGGER.error("Error while disconnecting from the fedmsg relay:\n" + e);
         }
     }
 
