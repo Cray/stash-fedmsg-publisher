@@ -13,7 +13,7 @@ public class Message {
 
     private HashMap<String, Object> content;
     private String topic;
-    private static final Logger LOGGER = LoggerFactory.getLogger(Message.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger("com.cray.stash.logger");
 
     public Message(Map<String, Object> content, String topic) {
         this.topic = topic;

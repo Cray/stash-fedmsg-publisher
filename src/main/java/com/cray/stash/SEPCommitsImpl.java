@@ -24,7 +24,7 @@ public class SEPCommitsImpl implements SEPCommits {
     private SecurityService security;
     private RepositoryService repoService;
     private int pageLimit;
-    private static final Logger LOGGER = LoggerFactory.getLogger(SEPCommitsImpl.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger("com.cray.stash.logger");
     private String topicPrefix;
     private static final int BRANCHNAME_OFFSET = 11;
 

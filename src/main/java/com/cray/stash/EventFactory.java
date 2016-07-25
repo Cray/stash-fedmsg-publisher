@@ -3,6 +3,8 @@ package com.cray.stash;
 import com.atlassian.stash.event.RepositoryRefsChangedEvent;
 import org.slf4j.Logger;
 import com.atlassian.event.api.EventListener;
+import org.slf4j.LoggerFactory;
+
 import java.util.concurrent.ExecutorService;
 
 /**
@@ -11,14 +13,13 @@ import java.util.concurrent.ExecutorService;
  */
 public class EventFactory {
 
-    private  final Logger LOGGER;
+    private static final Logger LOGGER = LoggerFactory.getLogger("com.cray.stash.logger");
     private SEPRefChangeEvent sepRefChangeEvent;
     private ExecutorService executorService;
 
-    public EventFactory(SEPRefChangeEvent sepRefChangeEvent, ExecutorService executorService, EventLoggerFactory eventLoggerFactory){
+    public EventFactory(SEPRefChangeEvent sepRefChangeEvent, ExecutorService executorService){
         this.sepRefChangeEvent = sepRefChangeEvent;
         this.executorService = executorService;
-        this.LOGGER = eventLoggerFactory.getLoggerForThis(this);
     }
 
     @EventListener

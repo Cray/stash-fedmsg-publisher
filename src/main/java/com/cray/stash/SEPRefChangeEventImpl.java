@@ -16,7 +16,7 @@ import java.util.List;
  */
 public class SEPRefChangeEventImpl implements SEPRefChangeEvent {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(SEPRefChangeEventImpl.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger("com.cray.stash.logger");
     private SEPCommits sepCommits;
     private FedmsgConnection connection;
     private String endpoint;
