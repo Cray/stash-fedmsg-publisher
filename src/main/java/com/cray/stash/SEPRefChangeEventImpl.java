@@ -64,7 +64,7 @@ public class SEPRefChangeEventImpl implements SEPRefChangeEvent {
 
     public void connectRelayAndProcess(RepositoryRefsChangedEvent event){
         try {
-            LOGGER.info("Establishing  connection to relay.");
+            LOGGER.info("Establishing connection to relay.");
             connection = new FedmsgConnection(endpoint, 2000).connect();
         } catch (Exception e) {
             LOGGER.error("Failed to connect to relay:\n" + e);
