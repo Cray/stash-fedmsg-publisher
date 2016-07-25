@@ -1,0 +1,23 @@
+<atlassian-plugin key="${project.groupId}.${project.artifactId}" name="${project.name}" plugins-version="2">
+    <plugin-info>
+        <description>${project.description}</description>
+        <version>${project.version}</version>
+        <vendor name="${project.organization.name}" url="${project.organization.url}" />
+        <param name="plugin-icon">images/pluginIcon.png</param>
+        <param name="plugin-logo">images/pluginLogo.png</param>
+    </plugin-info>
+
+    <component key="EventFactory" class="com.cray.stash.EventFactory"/>
+    <component key="sepRefChangeEvent" class="com.cray.stash.SEPRefChangeEventImpl" public="True" interface="com.cray.stash.SEPRefChangeEvent"/>
+    <component key="sepCommits" class="com.cray.stash.SEPCommitsImpl" public="True" interface="com.cray.stash.SEPCommits"/>
+    <component key="eventLoggerFactory" class="com.cray.stash.EventLoggerFactory"/>
+
+    <component-import key="commitService" interface="com.atlassian.stash.commit.CommitService"/>
+    <component-import key="repoData" interface="com.atlassian.stash.repository.RefService"/>
+    <component-import key="repoService" interface="com.atlassian.stash.repository.RepositoryService"/>
+    <component-import key="appService" interface="com.atlassian.stash.server.ApplicationPropertiesService"/>
+    <component-import key="security" interface="com.atlassian.stash.user.SecurityService"/>
+    <component-import key="concurrencyService" interface="com.atlassian.stash.concurrent.ConcurrencyService"/>
+    <component-import key="executorService" interface="java.util.concurrent.ExecutorService"/>
+
+</atlassian-plugin>
