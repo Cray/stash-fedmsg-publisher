@@ -2,14 +2,12 @@ package com.cray.stash;
 
 import java.io.File;
 import java.io.InputStream;
-
-import org.slf4j.Logger;
+import ch.qos.logback.classic.Logger;
+import com.atlassian.stash.server.ApplicationPropertiesService;
 import org.slf4j.LoggerFactory;
-
 import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.joran.JoranConfigurator;
 import ch.qos.logback.core.joran.spi.JoranException;
-
 import com.atlassian.sal.api.ApplicationProperties;
 
 /**
@@ -18,26 +16,26 @@ import com.atlassian.sal.api.ApplicationProperties;
 public class EventLoggerFactory {
 
     private static final String ROOT = "com.cray.stash.signupmanager";
-    private static final Logger stashRootLogger = LoggerFactory.getLogger("ROOT");
+    private static final org.slf4j.Logger stashRootLogger = LoggerFactory.getLogger("ROOT");
 
     private LoggerContext context;
 
     private final String homeDir;
 
-    public EventLoggerFactory(ApplicationProperties applicationProperties) {
-        homeDir = applicationProperties.getHomeDirectory().getAbsolutePath();
+    public EventLoggerFactory(ApplicationPropertiesService appService) {
+        homeDir = appService.getHomeDir().getAbsolutePath();
         init();
     }
 
-    public EventLoggerFactory() {
-        homeDir = new File(".").getAbsolutePath();
-        init();
-    }
+//    public EventLoggerFactory() {
+//        homeDir = new File(".").getAbsolutePath();
+//        init();
+//    }
 
     private void init() {
         // Assumes LSF4J is bound to logback
         context = (LoggerContext) LoggerFactory.getILoggerFactory();
-
+        context.reset();
         // store the home dir to use for relative paths
         context.putProperty("stash.home", homeDir);
 
@@ -73,9 +71,7 @@ public class EventLoggerFactory {
         if (className.startsWith("class ")) {
             className = className.replaceFirst("class ", "");
         }
-
         return context.getLogger(className);
-
     }
 
     public Logger getLoggerForThis(Object obj) {
@@ -83,8 +79,6 @@ public class EventLoggerFactory {
         if (className.startsWith("class ")) {
             className = className.replaceFirst("class ", "");
         }
-
         return context.getLogger(className);
-
     }
 }
