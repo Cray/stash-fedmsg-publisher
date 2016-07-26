@@ -4,7 +4,6 @@ import com.atlassian.stash.event.RepositoryRefsChangedEvent;
 import org.slf4j.Logger;
 import com.atlassian.event.api.EventListener;
 import org.slf4j.LoggerFactory;
-
 import java.util.concurrent.ExecutorService;
 
 /**
