@@ -7,7 +7,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.cray.stash</groupId>
     <artifactId>events</artifactId>
-    <version>1.2.4</version>
+    <version>1.2.5</version>
 
     <organization>
         <name>Cray Inc.</name>
